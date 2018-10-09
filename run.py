@@ -12,7 +12,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 """
 
-import random
+import numpy as np
 import tensorflow as tf
 
 tf.enable_eager_execution()
@@ -27,7 +27,7 @@ DIM_MESSAGE = int(NDIMS > 1)
 # TODO: vary context size, not just 2*NDIMS...
 # TODO: parameterize hidden layers
 sender = tf.keras.Sequential([
-    tf.keras.layers.Dense(10, input_shape=(CONTEXT_SIZE*(NDIMS + 1),),
+    tf.keras.layers.Dense(10, input_shape=(CONTEXT_SIZE*NDIMS + 1,),
                           activation=tf.nn.elu),
     tf.keras.layers.Dense(2 + NDIMS*DIM_MESSAGE)
 ])
@@ -39,7 +39,7 @@ receiver = tf.keras.Sequential([
 ])
 
 BATCH_SIZE = 8
-NUM_BATCHES = 10000
+NUM_BATCHES = 8000
 
 optimizer = tf.train.AdamOptimizer()
 
@@ -47,15 +47,21 @@ for _ in range(NUM_BATCHES):
 
     # 1. get contexts from Nature
     # TODO: get_context method, for >1 dim
-    context = [random.sample(OBJS, CONTEXT_SIZE) for _ in range(BATCH_SIZE)]
-    target = [random.randrange(CONTEXT_SIZE) for _ in range(BATCH_SIZE)]
+    context = np.stack([np.random.choice(OBJS, size=CONTEXT_SIZE, replace=False)
+                        for _ in range(BATCH_SIZE)])
+    target = np.random.randint(CONTEXT_SIZE, size=(BATCH_SIZE))
     target_one_hot = tf.one_hot(target, depth=CONTEXT_SIZE)
+    rows = tf.range(BATCH_SIZE)
+    indices = tf.stack([rows, target], axis=1)
+    target_values = tf.to_float(tf.reshape(
+        tf.gather_nd(context, indices),
+        (BATCH_SIZE, 1)))
 
     with tf.GradientTape() as tape:
         # 2. get signal(s) from sender
         # TODO: make this work with length-2 signals
         message_logits = sender(
-            tf.concat([context, target_one_hot], axis=1))
+            tf.concat([context, target_values], axis=1))
         message = tf.stop_gradient(tf.squeeze(tf.one_hot(
             tf.multinomial(message_logits, num_samples=1),
             depth=CONTEXT_SIZE)))
@@ -86,9 +92,11 @@ for _ in range(NUM_BATCHES):
         grads = tape.gradient(sender_loss + receiver_loss,
                               sender.variables + receiver.variables)
 
+    print('')
     print(context)
     print(target)
     print(message)
+    print(reward)
     print('Mean reward: {}'.format(tf.reduce_mean(reward)))
     optimizer.apply_gradients(zip(grads, sender.variables + receiver.variables),
                        global_step=tf.train.get_or_create_global_step())
