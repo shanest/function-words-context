@@ -39,17 +39,23 @@ receiver = tf.keras.Sequential([
 BATCH_SIZE = 8
 NUM_BATCHES = 10
 
+
 for _ in range(NUM_BATCHES):
 
+    # TODO: get_context method...
     context = [random.sample(OBJS, CONTEXT_SIZE) for _ in range(BATCH_SIZE)]
     target = [random.randrange(CONTEXT_SIZE) for _ in range(BATCH_SIZE)]
-    print(target)
     # TODO: make this work with length-2 signals
-    message_probs = sender(
+    message_logits = sender(
         tf.concat([context, tf.one_hot(target, depth=CONTEXT_SIZE)], axis=1))
-    message = tf.one_hot(tf.argmax(message_probs, axis=1), depth=CONTEXT_SIZE)
-    print(message_probs)
-    print(tf.one_hot(tf.argmax(message, axis=1), depth=CONTEXT_SIZE))
+    message = tf.squeeze(tf.one_hot(tf.multinomial(message_logits, num_samples=1),
+                         depth=CONTEXT_SIZE))
+    print(message_logits)
+    print(message)
     choice_logits = receiver(tf.concat([context, message], axis=1))
     print(choice_logits)
-    print(tf.to_int64(tf.equal(target, tf.argmax(choice_logits, axis=1))))
+    choice = tf.squeeze(tf.multinomial(choice_logits, num_samples=1))
+    print(target)
+    print(choice)
+    reward = tf.to_int64(tf.equal(target, choice))
+    print(reward)
