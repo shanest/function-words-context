@@ -17,8 +17,10 @@ import tensorflow as tf
 
 tf.enable_eager_execution()
 
+# TODO: major refactor, make everything modular!!
+
 NDIMS = 1
-OBJS = list(range(100))
+OBJS = list(range(12))
 CONTEXT_SIZE = 2
 DIM_MESSAGE = int(NDIMS > 1)
 
@@ -37,38 +39,56 @@ receiver = tf.keras.Sequential([
 ])
 
 BATCH_SIZE = 8
-NUM_BATCHES = 10
+NUM_BATCHES = 10000
 
+optimizer = tf.train.AdamOptimizer()
 
 for _ in range(NUM_BATCHES):
 
-    # TODO: get_context method...
+    # 1. get contexts from Nature
+    # TODO: get_context method, for >1 dim
     context = [random.sample(OBJS, CONTEXT_SIZE) for _ in range(BATCH_SIZE)]
     target = [random.randrange(CONTEXT_SIZE) for _ in range(BATCH_SIZE)]
     target_one_hot = tf.one_hot(target, depth=CONTEXT_SIZE)
-    # TODO: make this work with length-2 signals
-    message_logits = sender(
-        tf.concat([context, target_one_hot], axis=1))
-    message = tf.squeeze(tf.one_hot(tf.multinomial(message_logits, num_samples=1),
-                         depth=CONTEXT_SIZE))
-    print(message_logits)
-    print(message)
-    choice_logits = receiver(tf.concat([context, message], axis=1))
-    print(choice_logits)
-    choice = tf.squeeze(tf.one_hot(tf.multinomial(choice_logits, num_samples=1),
-                                   depth=CONTEXT_SIZE))
+
+    with tf.GradientTape() as tape:
+        # 2. get signal(s) from sender
+        # TODO: make this work with length-2 signals
+        message_logits = sender(
+            tf.concat([context, target_one_hot], axis=1))
+        message = tf.stop_gradient(tf.squeeze(tf.one_hot(
+            tf.multinomial(message_logits, num_samples=1),
+            depth=CONTEXT_SIZE)))
+
+        # 3. get choice from receiver
+        choice_logits = receiver(tf.concat([context, message], axis=1))
+        choice = tf.stop_gradient(tf.squeeze(tf.one_hot(
+            tf.multinomial(choice_logits, num_samples=1),
+            depth=CONTEXT_SIZE)))
+
+        # 4. get reward
+        reward = tf.stop_gradient(tf.to_float(
+            tf.equal(target, tf.argmax(choice, axis=1))))
+        # reward 1/0 goes to 1/-1
+        advantages = 2*reward - 1
+
+        # 5. compute losses
+        sender_loss = tf.reduce_mean(
+            advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
+                labels=message,
+                logits=message_logits))
+
+        receiver_loss = tf.reduce_mean(
+            advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
+                labels=choice,
+                logits=choice_logits))
+
+        grads = tape.gradient(sender_loss + receiver_loss,
+                              sender.variables + receiver.variables)
+
+    print(context)
     print(target)
-    print(choice)
-    reward = tf.to_float(tf.equal(target, tf.argmax(choice, axis=1)))
-    # reward 1/0 goes to 1/-1
-    advantages = 2*reward - 1
-    print(reward)
-    print(advantages)
-
-    sender_loss = advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
-        labels=message,
-        logits=message_logits)
-
-    receiver_loss = advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
-        labels=choice,
-        logits=choice_logits)
+    print(message)
+    print('Mean reward: {}'.format(tf.reduce_mean(reward)))
+    optimizer.apply_gradients(zip(grads, sender.variables + receiver.variables),
+                       global_step=tf.train.get_or_create_global_step())
