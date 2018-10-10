@@ -115,7 +115,7 @@ if __name__ == '__main__':
             # 4. get reward
             # TODO: record awards over time, or running mean, or....
             reward = tf.stop_gradient(tf.to_float(
-                tf.equal(target, tf.argmax(choice, axis=1))))
+                tf.equal(tf.squeeze(target), tf.argmax(choice, axis=1))))
             # reward 1/0 goes to 1/-1
             advantages = 2*reward - 1
 
