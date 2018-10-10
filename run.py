@@ -19,9 +19,9 @@ tf.enable_eager_execution()
 
 # TODO: major refactor, make everything modular!!
 
-NDIMS = 1
+NDIMS = 2
 OBJS = list(range(12))
-CONTEXT_SIZE = 2
+CONTEXT_SIZE = 2*NDIMS
 DIM_MESSAGE = int(NDIMS > 1)
 
 # TODO: vary context size, not just 2*NDIMS...
@@ -34,7 +34,8 @@ sender = tf.keras.Sequential([
 ])
 
 receiver = tf.keras.Sequential([
-    tf.keras.layers.Dense(8, input_shape=(CONTEXT_SIZE*(NDIMS + 1),),
+    tf.keras.layers.Dense(8,
+                          input_shape=(CONTEXT_SIZE*NDIMS + NDIMS*DIM_MESSAGE + 2,),
                           activation=tf.nn.elu),
     tf.keras.layers.Dense(8, activation=tf.nn.elu),
     tf.keras.layers.Dense(CONTEXT_SIZE)
@@ -43,7 +44,7 @@ receiver = tf.keras.Sequential([
 BATCH_SIZE = 16
 NUM_BATCHES = 100000
 
-optimizer = tf.train.AdamOptimizer(1e-4)
+optimizer = tf.train.AdamOptimizer(1e-3)
 
 
 def get_context(n_dims, scale):
@@ -73,30 +74,38 @@ def get_context(n_dims, scale):
 
 if __name__ == '__main__':
 
-    for _ in range(NUM_BATCHES):
+    for batch in range(NUM_BATCHES):
 
         # 1. get contexts from Nature
         # TODO: get_context method, for >1 dim
-        context = np.stack([np.random.choice(OBJS, size=CONTEXT_SIZE, replace=False)
+        context = np.stack([get_context(NDIMS, OBJS)
                             for _ in range(BATCH_SIZE)])
-        target = np.random.randint(CONTEXT_SIZE, size=(BATCH_SIZE))
+        target = np.random.randint(CONTEXT_SIZE, size=(BATCH_SIZE, 1))
         target_one_hot = tf.one_hot(target, depth=CONTEXT_SIZE)
         # TODO: get entire obj_slice, not just single value, when NDIMS > 1
-        rows = tf.range(BATCH_SIZE)
-        indices = tf.stack([rows, target], axis=1)
-        target_values = tf.to_float(tf.reshape(
-            tf.gather_nd(context, indices),
-            (BATCH_SIZE, 1)))
+        rows = np.reshape(np.arange(BATCH_SIZE), (BATCH_SIZE, 1))
+        obj_lens = np.stack([np.arange(NDIMS) for _ in range(BATCH_SIZE)])
+        target_values = tf.to_float(context[rows, target+obj_lens])
 
         with tf.GradientTape() as tape:
             # 2. get signal(s) from sender
             # TODO: make this work with length-2 signals
-            message_logits = sender(
+            all_message_logits = sender(
                 tf.concat([context, target_values], axis=1))
-            message = tf.stop_gradient(tf.squeeze(tf.one_hot(
-                tf.multinomial(message_logits, num_samples=1),
-                depth=CONTEXT_SIZE)))
+            min_max_message_logits = all_message_logits[:, -2:]
+            min_max_message = tf.stop_gradient(tf.squeeze(tf.one_hot(
+                tf.multinomial(min_max_message_logits, num_samples=1),
+                depth=2)))
+            if NDIMS > 1:
+                dim_message_logits = all_message_logits[:, :-2]
+                dim_message = tf.stop_gradient(tf.squeeze(tf.one_hot(
+                    tf.multinomial(dim_message_logits, num_samples=1),
+                    depth=NDIMS)))
+                message = tf.concat([dim_message, min_max_message], axis=1)
+            else:
+                message = min_max_message
 
+            print(message)
             # 3. get choice from receiver
             choice_logits = receiver(tf.concat([context, message], axis=1))
             choice = tf.stop_gradient(tf.squeeze(tf.one_hot(
@@ -113,8 +122,13 @@ if __name__ == '__main__':
             # 5. compute losses
             sender_loss = tf.reduce_mean(
                 advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
-                    labels=message,
-                    logits=message_logits))
+                    labels=min_max_message,
+                    logits=min_max_message_logits))
+            if NDIMS > 1:
+                sender_loss = 0.5*sender_loss + 0.5*tf.reduce_mean(
+                    advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
+                        labels=dim_message,
+                        logits=dim_message_logits))
 
             receiver_loss = tf.reduce_mean(
                 advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
@@ -124,7 +138,7 @@ if __name__ == '__main__':
             grads = tape.gradient(sender_loss + receiver_loss,
                                   sender.variables + receiver.variables)
 
-        print('')
+        print('\nIteration: {}'.format(batch))
         print(context)
         print(target)
         print(message)
