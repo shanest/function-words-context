@@ -19,32 +19,34 @@ tf.enable_eager_execution()
 
 # TODO: major refactor, make everything modular!!
 
-NDIMS = 2
-OBJS = list(range(12))
+NDIMS = 3
+OBJS = np.arange(0, 12)
 CONTEXT_SIZE = 2*NDIMS
 DIM_MESSAGE = int(NDIMS > 1)
 
 # TODO: vary context size, not just 2*NDIMS...
 # TODO: parameterize hidden layers
 sender = tf.keras.Sequential([
-    tf.keras.layers.Dense(8, input_shape=(NDIMS*(CONTEXT_SIZE + 1),),
+    tf.keras.layers.Dense(32, input_shape=(NDIMS*CONTEXT_SIZE + CONTEXT_SIZE,),
                           activation=tf.nn.elu),
-    tf.keras.layers.Dense(8, activation=tf.nn.elu),
+    tf.keras.layers.Dense(16, activation=tf.nn.elu),
+    tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(2 + NDIMS*DIM_MESSAGE)
 ])
 
 receiver = tf.keras.Sequential([
-    tf.keras.layers.Dense(8,
+    tf.keras.layers.Dense(32,
                           input_shape=(CONTEXT_SIZE*NDIMS + NDIMS*DIM_MESSAGE + 2,),
                           activation=tf.nn.elu),
-    tf.keras.layers.Dense(8, activation=tf.nn.elu),
+    tf.keras.layers.Dense(16, activation=tf.nn.elu),
+    tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(CONTEXT_SIZE)
 ])
 
 BATCH_SIZE = 16
 NUM_BATCHES = 100000
 
-optimizer = tf.train.AdamOptimizer(1e-3)
+optimizer = tf.train.AdamOptimizer(1e-5)
 
 
 def get_context(n_dims, scale):
@@ -60,7 +62,7 @@ def get_context(n_dims, scale):
     for idx in range(n_dims):
         dimension = np.random.choice(scale, size=2*n_dims, replace=False)
         where_min = np.argmin(dimension)
-        min_idx = idx * n_dims
+        min_idx = idx * 2
         dimension[[where_min, min_idx]] = dimension[[min_idx, where_min]]
         where_max = np.argmax(dimension)
         max_idx = min_idx + 1
@@ -77,21 +79,18 @@ if __name__ == '__main__':
     for batch in range(NUM_BATCHES):
 
         # 1. get contexts from Nature
-        # TODO: get_context method, for >1 dim
         context = np.stack([get_context(NDIMS, OBJS)
                             for _ in range(BATCH_SIZE)])
         target = np.random.randint(CONTEXT_SIZE, size=(BATCH_SIZE, 1))
-        target_one_hot = tf.one_hot(target, depth=CONTEXT_SIZE)
-        # TODO: get entire obj_slice, not just single value, when NDIMS > 1
+        target_one_hot = tf.squeeze(tf.one_hot(target, depth=CONTEXT_SIZE))
         rows = np.reshape(np.arange(BATCH_SIZE), (BATCH_SIZE, 1))
         obj_lens = np.stack([np.arange(NDIMS) for _ in range(BATCH_SIZE)])
         target_values = tf.to_float(context[rows, target+obj_lens])
 
         with tf.GradientTape() as tape:
             # 2. get signal(s) from sender
-            # TODO: make this work with length-2 signals
             all_message_logits = sender(
-                tf.concat([context, target_values], axis=1))
+                tf.concat([context, target_one_hot], axis=1))
             min_max_message_logits = all_message_logits[:, -2:]
             min_max_message = tf.stop_gradient(tf.squeeze(tf.one_hot(
                 tf.multinomial(min_max_message_logits, num_samples=1),
@@ -105,7 +104,6 @@ if __name__ == '__main__':
             else:
                 message = min_max_message
 
-            print(message)
             # 3. get choice from receiver
             choice_logits = receiver(tf.concat([context, message], axis=1))
             choice = tf.stop_gradient(tf.squeeze(tf.one_hot(
@@ -116,23 +114,25 @@ if __name__ == '__main__':
             # TODO: record awards over time, or running mean, or....
             reward = tf.stop_gradient(tf.to_float(
                 tf.equal(tf.squeeze(target), tf.argmax(choice, axis=1))))
-            # reward 1/0 goes to 1/-1
+            # reward 1/0 goes to -1/1; minimize loss, not maximize prob
             advantages = 2*reward - 1
+            # TODO: why does this work better than advantages?
+            # advantages = reward
 
             # 5. compute losses
             sender_loss = tf.reduce_mean(
-                advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
-                    labels=min_max_message,
+                advantages * tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    labels=tf.squeeze(tf.argmax(min_max_message, axis=1)),
                     logits=min_max_message_logits))
             if NDIMS > 1:
-                sender_loss = 0.5*sender_loss + 0.5*tf.reduce_mean(
-                    advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
-                        labels=dim_message,
+                sender_loss = sender_loss + tf.reduce_mean(
+                    advantages * tf.nn.sparse_softmax_cross_entropy_with_logits(
+                        labels=tf.squeeze(tf.argmax(dim_message, axis=1)),
                         logits=dim_message_logits))
 
             receiver_loss = tf.reduce_mean(
-                advantages * tf.nn.softmax_cross_entropy_with_logits_v2(
-                    labels=choice,
+                advantages * tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    labels=tf.squeeze(tf.argmax(choice, axis=1)),
                     logits=choice_logits))
 
             grads = tape.gradient(sender_loss + receiver_loss,
