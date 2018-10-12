@@ -19,7 +19,7 @@ tf.enable_eager_execution()
 
 # TODO: major refactor, make everything modular!!
 
-NDIMS = 2
+NDIMS = 1
 OBJS = np.arange(0, 12)
 CONTEXT_SIZE = 2*NDIMS
 DIM_MESSAGE = int(NDIMS > 1)
@@ -27,26 +27,24 @@ DIM_MESSAGE = int(NDIMS > 1)
 # TODO: vary context size, not just 2*NDIMS...
 # TODO: parameterize hidden layers
 sender = tf.keras.Sequential([
-    tf.keras.layers.Dense(64, input_shape=(NDIMS*CONTEXT_SIZE + CONTEXT_SIZE,),
+    tf.keras.layers.Dense(32, input_shape=(NDIMS*CONTEXT_SIZE + CONTEXT_SIZE,),
                           activation=tf.nn.elu),
-    tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(2 + NDIMS*DIM_MESSAGE)
 ])
 
 receiver = tf.keras.Sequential([
-    tf.keras.layers.Dense(64,
+    tf.keras.layers.Dense(32,
                           input_shape=(CONTEXT_SIZE*NDIMS + NDIMS*DIM_MESSAGE + 2,),
                           activation=tf.nn.elu),
-    tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(CONTEXT_SIZE)
 ])
 
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 NUM_BATCHES = 100000
 
-optimizer = tf.train.AdamOptimizer(1e-4)
+optimizer = tf.train.AdamOptimizer(1e-5)
 
 
 def get_context(n_dims, scale):
@@ -73,7 +71,7 @@ def get_context(n_dims, scale):
     objs = np.transpose(objs)
     np.random.shuffle(objs)
     """
-    return objs.flatten()
+    return np.array(objs).flatten()
 
 
 def get_permutations(batch_size, context_size):
@@ -85,7 +83,7 @@ def get_permutations(batch_size, context_size):
 def apply_perms(contexts, perms, n_dims, batch_size):
     # TODO: DOCUMENT
     obj_indices = np.tile(np.stack([np.arange(n_dims)
-                                    for _ in range(batch_size)]), n_dims)
+                                    for _ in range(batch_size)]), 2*n_dims)
     perm_idx = np.repeat(perms, n_dims, axis=1)*n_dims + obj_indices
     return contexts[np.arange(batch_size)[:, None], perm_idx]
 
@@ -101,8 +99,19 @@ if __name__ == '__main__':
         # 1. get contexts from Nature
         context = np.stack([get_context(NDIMS, OBJS)
                             for _ in range(BATCH_SIZE)])
+
+        sender_perms = get_permutations(BATCH_SIZE, CONTEXT_SIZE)
+        sender_contexts = apply_perms(context, sender_perms, NDIMS, BATCH_SIZE)
+
+        rec_perms = get_permutations(BATCH_SIZE, CONTEXT_SIZE)
+        rec_contexts = apply_perms(context, rec_perms, NDIMS, BATCH_SIZE)
+
         target = np.random.randint(CONTEXT_SIZE, size=(BATCH_SIZE, 1))
-        target_one_hot = tf.squeeze(tf.one_hot(target, depth=CONTEXT_SIZE))
+        sender_target = sender_perms[np.arange(BATCH_SIZE)[:, None], target]
+        rec_target = rec_perms[np.arange(BATCH_SIZE)[:, None], target]
+
+        target_one_hot = tf.squeeze(tf.one_hot(sender_target, depth=CONTEXT_SIZE))
+
         rows = np.reshape(np.arange(BATCH_SIZE), (BATCH_SIZE, 1))
         obj_lens = np.stack([np.arange(NDIMS) for _ in range(BATCH_SIZE)])
         target_values = tf.to_float(context[rows, target+obj_lens])
@@ -133,11 +142,11 @@ if __name__ == '__main__':
             # 4. get reward
             # TODO: record awards over time, or running mean, or....
             reward = tf.stop_gradient(tf.to_float(
-                tf.equal(tf.squeeze(target), tf.argmax(choice, axis=1))))
+                tf.equal(tf.squeeze(rec_target), tf.argmax(choice, axis=1))))
             # reward 1/0 goes to -1/1; minimize loss, not maximize prob
-            advantages = 2*reward - 1
+            # advantages = 2*reward - 1
             # TODO: why does this work better than advantages?
-            # advantages = reward
+            advantages = reward
 
             # 5. compute losses
             sender_loss = tf.reduce_mean(
