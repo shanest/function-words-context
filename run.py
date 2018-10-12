@@ -19,7 +19,7 @@ tf.enable_eager_execution()
 
 # TODO: major refactor, make everything modular!!
 
-NDIMS = 3
+NDIMS = 2
 OBJS = np.arange(0, 12)
 CONTEXT_SIZE = 2*NDIMS
 DIM_MESSAGE = int(NDIMS > 1)
@@ -27,7 +27,7 @@ DIM_MESSAGE = int(NDIMS > 1)
 # TODO: vary context size, not just 2*NDIMS...
 # TODO: parameterize hidden layers
 sender = tf.keras.Sequential([
-    tf.keras.layers.Dense(32, input_shape=(NDIMS*CONTEXT_SIZE + CONTEXT_SIZE,),
+    tf.keras.layers.Dense(64, input_shape=(NDIMS*CONTEXT_SIZE + CONTEXT_SIZE,),
                           activation=tf.nn.elu),
     tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(16, activation=tf.nn.elu),
@@ -35,7 +35,7 @@ sender = tf.keras.Sequential([
 ])
 
 receiver = tf.keras.Sequential([
-    tf.keras.layers.Dense(32,
+    tf.keras.layers.Dense(64,
                           input_shape=(CONTEXT_SIZE*NDIMS + NDIMS*DIM_MESSAGE + 2,),
                           activation=tf.nn.elu),
     tf.keras.layers.Dense(16, activation=tf.nn.elu),
@@ -43,10 +43,10 @@ receiver = tf.keras.Sequential([
     tf.keras.layers.Dense(CONTEXT_SIZE)
 ])
 
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 NUM_BATCHES = 100000
 
-optimizer = tf.train.AdamOptimizer(1e-5)
+optimizer = tf.train.AdamOptimizer(1e-4)
 
 
 def get_context(n_dims, scale):
@@ -68,15 +68,35 @@ def get_context(n_dims, scale):
         max_idx = min_idx + 1
         dimension[[where_max, max_idx]] = dimension[[max_idx, where_max]]
         objs.append(dimension)
+    """
     objs = np.array(objs)
     objs = np.transpose(objs)
     np.random.shuffle(objs)
+    """
     return objs.flatten()
+
+
+def get_permutations(batch_size, context_size):
+
+    return np.stack([np.random.permutation(context_size)
+                     for _ in range(batch_size)])
+
+
+def apply_perms(contexts, perms, n_dims, batch_size):
+    # TODO: DOCUMENT
+    obj_indices = np.tile(np.stack([np.arange(n_dims)
+                                    for _ in range(batch_size)]), n_dims)
+    perm_idx = np.repeat(perms, n_dims, axis=1)*n_dims + obj_indices
+    return contexts[np.arange(batch_size)[:, None], perm_idx]
 
 
 if __name__ == '__main__':
 
     for batch in range(NUM_BATCHES):
+
+        # TODO: sender and receiver see SAME context, but in different _order_!
+        # sender perm, receiver perm; get them until they are diff
+        # apply to context, which is still ordered...
 
         # 1. get contexts from Nature
         context = np.stack([get_context(NDIMS, OBJS)
