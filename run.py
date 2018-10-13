@@ -27,7 +27,7 @@ DIM_MESSAGE = int(NDIMS > 1)
 # TODO: vary context size, not just 2*NDIMS...
 # TODO: parameterize hidden layers
 sender = tf.keras.Sequential([
-    tf.keras.layers.Dense(32, input_shape=(NDIMS*CONTEXT_SIZE + CONTEXT_SIZE,),
+    tf.keras.layers.Dense(32, input_shape=(NDIMS*CONTEXT_SIZE,),
                           activation=tf.nn.elu),
     tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(2 + NDIMS*DIM_MESSAGE)
@@ -44,7 +44,7 @@ receiver = tf.keras.Sequential([
 BATCH_SIZE = 16
 NUM_BATCHES = 100000
 
-optimizer = tf.train.AdamOptimizer(5e-5)
+optimizer = tf.train.AdamOptimizer()
 
 
 def get_context(n_dims, scale):
@@ -95,7 +95,7 @@ if __name__ == '__main__':
         context = np.stack([get_context(NDIMS, OBJS)
                             for _ in range(BATCH_SIZE)])
 
-        # TODO: sender always sends 'first' object in context; receiver sees
+        # NOTE: sender always sends 'first' object in context; receiver sees
         # permuted context
         sender_perms = get_permutations(BATCH_SIZE, CONTEXT_SIZE)
         sender_contexts = apply_perms(context, sender_perms, NDIMS, BATCH_SIZE)
@@ -104,6 +104,7 @@ if __name__ == '__main__':
         rec_contexts = apply_perms(context, rec_perms, NDIMS, BATCH_SIZE)
 
         target = np.random.randint(CONTEXT_SIZE, size=(BATCH_SIZE, 1))
+        target = np.zeros(shape=(BATCH_SIZE, 1), dtype=np.int64)
         sender_target = sender_perms[np.arange(BATCH_SIZE)[:, None], target]
         rec_target = rec_perms[np.arange(BATCH_SIZE)[:, None], target]
 
@@ -115,8 +116,8 @@ if __name__ == '__main__':
 
         with tf.GradientTape() as tape:
             # 2. get signal(s) from sender
-            all_message_logits = sender(
-                tf.concat([context, target_one_hot], axis=1))
+            all_message_logits = sender(context)
+                # tf.concat([context, target_one_hot], axis=1))
             min_max_message_logits = all_message_logits[:, -2:]
             min_max_message = tf.stop_gradient(tf.squeeze(tf.one_hot(
                 tf.multinomial(min_max_message_logits, num_samples=1),
@@ -166,7 +167,7 @@ if __name__ == '__main__':
 
         print('\nIteration: {}'.format(batch))
         print(context)
-        print(target)
+        print(target.flatten())
         print(message)
         print(reward)
         print('Mean reward: {}'.format(tf.reduce_mean(reward)))
