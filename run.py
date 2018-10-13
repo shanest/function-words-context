@@ -20,7 +20,7 @@ tf.enable_eager_execution()
 # TODO: major refactor, make everything modular!!
 
 NDIMS = 1
-OBJS = np.arange(0, 12)
+OBJS = np.arange(0, 1, 1/10)
 CONTEXT_SIZE = 2*NDIMS
 DIM_MESSAGE = int(NDIMS > 1)
 
@@ -44,7 +44,7 @@ receiver = tf.keras.Sequential([
 BATCH_SIZE = 16
 NUM_BATCHES = 100000
 
-optimizer = tf.train.AdamOptimizer(1e-5)
+optimizer = tf.train.AdamOptimizer(5e-5)
 
 
 def get_context(n_dims, scale):
@@ -66,11 +66,9 @@ def get_context(n_dims, scale):
         max_idx = min_idx + 1
         dimension[[where_max, max_idx]] = dimension[[max_idx, where_max]]
         objs.append(dimension)
-    """
     objs = np.array(objs)
     objs = np.transpose(objs)
     np.random.shuffle(objs)
-    """
     return np.array(objs).flatten()
 
 
@@ -92,14 +90,13 @@ if __name__ == '__main__':
 
     for batch in range(NUM_BATCHES):
 
-        # TODO: sender and receiver see SAME context, but in different _order_!
-        # sender perm, receiver perm; get them until they are diff
-        # apply to context, which is still ordered...
 
         # 1. get contexts from Nature
         context = np.stack([get_context(NDIMS, OBJS)
                             for _ in range(BATCH_SIZE)])
 
+        # TODO: sender always sends 'first' object in context; receiver sees
+        # permuted context
         sender_perms = get_permutations(BATCH_SIZE, CONTEXT_SIZE)
         sender_contexts = apply_perms(context, sender_perms, NDIMS, BATCH_SIZE)
 
@@ -134,7 +131,7 @@ if __name__ == '__main__':
                 message = min_max_message
 
             # 3. get choice from receiver
-            choice_logits = receiver(tf.concat([context, message], axis=1))
+            choice_logits = receiver(tf.concat([rec_contexts, message], axis=1))
             choice = tf.stop_gradient(tf.squeeze(tf.one_hot(
                 tf.multinomial(choice_logits, num_samples=1),
                 depth=CONTEXT_SIZE)))
@@ -144,9 +141,9 @@ if __name__ == '__main__':
             reward = tf.stop_gradient(tf.to_float(
                 tf.equal(tf.squeeze(rec_target), tf.argmax(choice, axis=1))))
             # reward 1/0 goes to -1/1; minimize loss, not maximize prob
-            # advantages = 2*reward - 1
+            advantages = 2*reward - 1
             # TODO: why does this work better than advantages?
-            advantages = reward
+            # advantages = reward
 
             # 5. compute losses
             sender_loss = tf.reduce_mean(
