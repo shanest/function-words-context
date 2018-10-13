@@ -30,6 +30,7 @@ sender = tf.keras.Sequential([
     tf.keras.layers.Dense(32, input_shape=(NDIMS*CONTEXT_SIZE,),
                           activation=tf.nn.elu),
     tf.keras.layers.Dense(16, activation=tf.nn.elu),
+    tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(2 + NDIMS*DIM_MESSAGE)
 ])
 
@@ -38,13 +39,14 @@ receiver = tf.keras.Sequential([
                           input_shape=(CONTEXT_SIZE*NDIMS + NDIMS*DIM_MESSAGE + 2,),
                           activation=tf.nn.elu),
     tf.keras.layers.Dense(16, activation=tf.nn.elu),
+    tf.keras.layers.Dense(16, activation=tf.nn.elu),
     tf.keras.layers.Dense(CONTEXT_SIZE)
 ])
 
 BATCH_SIZE = 16
-NUM_BATCHES = 100000
+NUM_BATCHES = 50000
 
-optimizer = tf.train.AdamOptimizer()
+optimizer = tf.train.AdamOptimizer(1e-4)
 
 
 def get_context(n_dims, scale):
