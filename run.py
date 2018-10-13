@@ -13,40 +13,42 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 """
 
 import numpy as np
-import tensorflow as tf
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-tf.enable_eager_execution()
 
-# TODO: major refactor, make everything modular!!
-
-NDIMS = 1
-OBJS = np.arange(0, 1, 1/10)
-CONTEXT_SIZE = 2*NDIMS
-DIM_MESSAGE = int(NDIMS > 1)
-
-# TODO: vary context size, not just 2*NDIMS...
 # TODO: parameterize hidden layers
-sender = tf.keras.Sequential([
-    tf.keras.layers.Dense(32, input_shape=(NDIMS*CONTEXT_SIZE,),
-                          activation=tf.nn.elu),
-    tf.keras.layers.Dense(16, activation=tf.nn.elu),
-    tf.keras.layers.Dense(16, activation=tf.nn.elu),
-    tf.keras.layers.Dense(2 + NDIMS*DIM_MESSAGE)
-])
 
-receiver = tf.keras.Sequential([
-    tf.keras.layers.Dense(32,
-                          input_shape=(CONTEXT_SIZE*NDIMS + NDIMS*DIM_MESSAGE + 2,),
-                          activation=tf.nn.elu),
-    tf.keras.layers.Dense(16, activation=tf.nn.elu),
-    tf.keras.layers.Dense(16, activation=tf.nn.elu),
-    tf.keras.layers.Dense(CONTEXT_SIZE)
-])
+# TODO: document
+class Sender(nn.Module):
+    def __init__(self, context_size, n_dims):
+        super(Sender, self).__init__()
+        self.fc1 = nn.Linear(context_size * n_dims, 32)
+        self.fc2 = nn.Linear(32, 16)
+        self.dim_msg = nn.Linear(16, n_dims)
+        self.min_msg = nn.Linear(16, 2)
 
-BATCH_SIZE = 16
-NUM_BATCHES = 50000
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        dim_logits = self.dim_msg(x)
+        min_logits = self.min_msg(x)
+        return F.softmax(dim_logits, dim=1), F.softmax(min_logits, dim=1)
 
-optimizer = tf.train.AdamOptimizer(1e-4)
+
+class Receiver(nn.Module):
+    def __init__(self, context_size, n_dims):
+        super(Receiver, self).__init__()
+        self.fc1 = nn.Linear(context_size * n_dims + 2 + n_dims, 32)
+        self.fc2 = nn.Linear(32, 16)
+        self.fc3 = nn.Linear(16, context_size)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return F.softmax(x, dim=1)
 
 
 def get_context(n_dims, scale):
@@ -90,88 +92,77 @@ def apply_perms(contexts, perms, n_dims, batch_size):
 
 if __name__ == '__main__':
 
-    for batch in range(NUM_BATCHES):
+    # TODO: argparse stuff!
+    n_dims = 3
+    objs = np.arange(0, 1, 1/10)
+    # TODO: vary context size, not just 2*NDIMS...
+    context_size = 2 * n_dims  # number of objects
 
+    batch_size = 16
+    num_batches = 50000
+
+    sender = Sender(context_size, n_dims)
+    receiver = Receiver(context_size, n_dims)
+
+    sender_opt = torch.optim.Adam(sender.parameters())
+    receiver_opt = torch.optim.Adam(receiver.parameters())
+
+    for batch in range(num_batches):
 
         # 1. get contexts from Nature
-        context = np.stack([get_context(NDIMS, OBJS)
-                            for _ in range(BATCH_SIZE)])
+        contexts = np.stack([get_context(n_dims, objs)
+                            for _ in range(batch_size)])
 
+        # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
         # permuted context
-        sender_perms = get_permutations(BATCH_SIZE, CONTEXT_SIZE)
-        sender_contexts = apply_perms(context, sender_perms, NDIMS, BATCH_SIZE)
+        rec_perms = get_permutations(batch_size, context_size)
+        rec_contexts = apply_perms(contexts, rec_perms, n_dims, batch_size)
+        # 1b. get correct target based on perms
+        target = np.zeros(shape=(batch_size, 1), dtype=np.int64)
+        rec_target = rec_perms[np.arange(batch_size)[:, None], target]
 
-        rec_perms = get_permutations(BATCH_SIZE, CONTEXT_SIZE)
-        rec_contexts = apply_perms(context, rec_perms, NDIMS, BATCH_SIZE)
+        # 2. get signals form sender
+        dim_probs, min_probs = sender(torch.Tensor(contexts))
+        dim_dist = torch.distributions.OneHotCategorical(dim_probs)
+        dim_msg = dim_dist.sample()
+        min_dist = torch.distributions.OneHotCategorical(min_probs)
+        min_msg = min_dist.sample()
 
-        target = np.random.randint(CONTEXT_SIZE, size=(BATCH_SIZE, 1))
-        target = np.zeros(shape=(BATCH_SIZE, 1), dtype=np.int64)
-        sender_target = sender_perms[np.arange(BATCH_SIZE)[:, None], target]
-        rec_target = rec_perms[np.arange(BATCH_SIZE)[:, None], target]
+        # 3. get choice from receiver
+        choice_probs = receiver(
+            torch.cat([torch.Tensor(rec_contexts), dim_msg, min_msg], dim=1))
+        choice_dist = torch.distributions.Categorical(choice_probs)
+        choice = choice_dist.sample()
 
-        target_one_hot = tf.squeeze(tf.one_hot(sender_target, depth=CONTEXT_SIZE))
+        # 4. get reward
+        reward = torch.unsqueeze(
+            torch.eq(
+                torch.from_numpy(rec_target.flatten()),
+                choice).float(),
+            dim=0)
+        # reward 1/0 goes to -1/1
+        advantages = 2*reward - 1
 
-        rows = np.reshape(np.arange(BATCH_SIZE), (BATCH_SIZE, 1))
-        obj_lens = np.stack([np.arange(NDIMS) for _ in range(BATCH_SIZE)])
-        target_values = tf.to_float(context[rows, target+obj_lens])
+        # 5. compute losses and reinforce
 
-        with tf.GradientTape() as tape:
-            # 2. get signal(s) from sender
-            all_message_logits = sender(context)
-                # tf.concat([context, target_one_hot], axis=1))
-            min_max_message_logits = all_message_logits[:, -2:]
-            min_max_message = tf.stop_gradient(tf.squeeze(tf.one_hot(
-                tf.multinomial(min_max_message_logits, num_samples=1),
-                depth=2)))
-            if NDIMS > 1:
-                dim_message_logits = all_message_logits[:, :-2]
-                dim_message = tf.stop_gradient(tf.squeeze(tf.one_hot(
-                    tf.multinomial(dim_message_logits, num_samples=1),
-                    depth=NDIMS)))
-                message = tf.concat([dim_message, min_max_message], axis=1)
-            else:
-                message = min_max_message
+        # 5a. sender
+        dim_log_prob = dim_dist.log_prob(dim_msg)
+        min_log_prob = min_dist.log_prob(min_msg)
+        sender_opt.zero_grad()
+        sender_loss = -torch.sum(advantages * (dim_log_prob + min_log_prob))
+        sender_loss.backward()
+        sender_opt.step()
 
-            # 3. get choice from receiver
-            choice_logits = receiver(tf.concat([rec_contexts, message], axis=1))
-            choice = tf.stop_gradient(tf.squeeze(tf.one_hot(
-                tf.multinomial(choice_logits, num_samples=1),
-                depth=CONTEXT_SIZE)))
-
-            # 4. get reward
-            # TODO: record awards over time, or running mean, or....
-            reward = tf.stop_gradient(tf.to_float(
-                tf.equal(tf.squeeze(rec_target), tf.argmax(choice, axis=1))))
-            # reward 1/0 goes to -1/1; minimize loss, not maximize prob
-            advantages = 2*reward - 1
-            # TODO: why does this work better than advantages?
-            # advantages = reward
-
-            # 5. compute losses
-            sender_loss = tf.reduce_mean(
-                advantages * tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    labels=tf.squeeze(tf.argmax(min_max_message, axis=1)),
-                    logits=min_max_message_logits))
-            if NDIMS > 1:
-                sender_loss = sender_loss + tf.reduce_mean(
-                    advantages * tf.nn.sparse_softmax_cross_entropy_with_logits(
-                        labels=tf.squeeze(tf.argmax(dim_message, axis=1)),
-                        logits=dim_message_logits))
-
-            receiver_loss = tf.reduce_mean(
-                advantages * tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    labels=tf.squeeze(tf.argmax(choice, axis=1)),
-                    logits=choice_logits))
-
-            grads = tape.gradient(sender_loss + receiver_loss,
-                                  sender.variables + receiver.variables)
+        # 5b. receiver
+        choice_log_prob = choice_dist.log_prob(choice)
+        receiver_opt.zero_grad()
+        receiver_loss = -torch.sum(advantages * choice_log_prob)
+        receiver_loss.backward()
+        receiver_opt.step()
 
         print('\nIteration: {}'.format(batch))
-        print(context)
-        print(target.flatten())
-        print(message)
+        print(contexts)
+        print(torch.cat([dim_msg, min_msg], dim=1))
         print(reward)
-        print('Mean reward: {}'.format(tf.reduce_mean(reward)))
-        optimizer.apply_gradients(zip(grads, sender.variables + receiver.variables),
-                           global_step=tf.train.get_or_create_global_step())
+        print('% correct: {}'.format(torch.mean(reward)))
