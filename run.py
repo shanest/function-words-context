@@ -25,9 +25,9 @@ class Sender(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Sender, self).__init__()
         self.fc1 = nn.Linear(context_size * n_dims, 32)
-        self.fc2 = nn.Linear(32, 16)
-        self.dim_msg = nn.Linear(16, n_dims)
-        self.min_msg = nn.Linear(16, 2)
+        self.fc2 = nn.Linear(32, 32)
+        self.dim_msg = nn.Linear(32, n_dims)
+        self.min_msg = nn.Linear(32, 2)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -41,8 +41,8 @@ class Receiver(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Receiver, self).__init__()
         self.fc1 = nn.Linear(context_size * n_dims + 2 + n_dims, 32)
-        self.fc2 = nn.Linear(32, 16)
-        self.fc3 = nn.Linear(16, context_size)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, context_size)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -93,13 +93,13 @@ def apply_perms(contexts, perms, n_dims, batch_size):
 if __name__ == '__main__':
 
     # TODO: argparse stuff!
-    n_dims = 3
-    objs = np.arange(0, 1, 1/10)
+    n_dims = 1
+    objs = np.arange(0, 1, 1/20)
     # TODO: vary context size, not just 2*NDIMS...
     context_size = 2 * n_dims  # number of objects
 
     batch_size = 16
-    num_batches = 50000
+    num_batches = 100000
 
     sender = Sender(context_size, n_dims)
     receiver = Receiver(context_size, n_dims)
@@ -112,6 +112,8 @@ if __name__ == '__main__':
         # 1. get contexts from Nature
         contexts = np.stack([get_context(n_dims, objs)
                             for _ in range(batch_size)])
+        # batch normalize?
+        contexts = (contexts - np.mean(contexts)) / (np.std(contexts) + 1e-12)
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
@@ -140,9 +142,10 @@ if __name__ == '__main__':
             torch.eq(
                 torch.from_numpy(rec_target.flatten()),
                 choice).float(),
-            dim=0)
+            dim=0).detach()
         # reward 1/0 goes to -1/1
-        advantages = 2*reward - 1
+        # advantages = 2*reward.detach() - 1
+        advantages = (reward - reward.mean()) / (reward.std() + 1e-12)
 
         # 5. compute losses and reinforce
 
@@ -166,3 +169,6 @@ if __name__ == '__main__':
         print(torch.cat([dim_msg, min_msg], dim=1))
         print(reward)
         print('% correct: {}'.format(torch.mean(reward)))
+
+    print(list(sender.parameters()))
+    print(list(receiver.parameters()))
