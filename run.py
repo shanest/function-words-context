@@ -130,14 +130,16 @@ if __name__ == '__main__':
     objs = np.arange(0, 1, 1/20)
     # TODO: vary context size, not just 2*NDIMS...
     context_size = 2 * n_dims  # number of objects
+    fixed_sender = False
 
     batch_size = 16
     num_batches = 50000
 
-    sender = Sender(context_size, n_dims)
-    receiver = Receiver(context_size, n_dims)
+    if not fixed_sender:
+        sender = Sender(context_size, n_dims)
+        sender_opt = torch.optim.Adam(sender.parameters())
 
-    sender_opt = torch.optim.Adam(sender.parameters())
+    receiver = Receiver(context_size, n_dims)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
     writer = SummaryWriter()
@@ -161,18 +163,18 @@ if __name__ == '__main__':
         target = np.zeros(shape=(batch_size, 1), dtype=np.int64)
         rec_target = rec_perms[np.arange(batch_size)[:, None], target]
 
-        """
         # 2. get signals form sender
-        dim_probs, min_probs = sender(torch.Tensor(contexts))
-        dim_dist = torch.distributions.OneHotCategorical(dim_probs)
-        dim_msg = dim_dist.sample()
-        min_dist = torch.distributions.OneHotCategorical(min_probs)
-        min_msg = min_dist.sample()
-        """
-        dim_msg, min_msg = get_dim_and_dir(contexts, n_dims, context_size,
-                                           one_hot=True)
-        dim_msg = torch.Tensor(dim_msg)
-        min_msg = torch.Tensor(min_msg)
+        if fixed_sender:
+            dim_msg, min_msg = get_dim_and_dir(contexts, n_dims, context_size,
+                                               one_hot=True)
+            dim_msg = torch.Tensor(dim_msg)
+            min_msg = torch.Tensor(min_msg)
+        else:
+            dim_probs, min_probs = sender(torch.Tensor(contexts))
+            dim_dist = torch.distributions.OneHotCategorical(dim_probs)
+            dim_msg = dim_dist.sample()
+            min_dist = torch.distributions.OneHotCategorical(min_probs)
+            min_msg = min_dist.sample()
 
         # 3. get choice from receiver
         choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
@@ -192,15 +194,14 @@ if __name__ == '__main__':
 
         # 5. compute losses and reinforce
 
-        """
         # 5a. sender
-        dim_log_prob = dim_dist.log_prob(dim_msg)
-        min_log_prob = min_dist.log_prob(min_msg)
-        sender_opt.zero_grad()
-        sender_loss = -torch.sum(advantages * (dim_log_prob + min_log_prob))
-        sender_loss.backward()
-        sender_opt.step()
-        """
+        if not fixed_sender:
+            dim_log_prob = dim_dist.log_prob(dim_msg)
+            min_log_prob = min_dist.log_prob(min_msg)
+            sender_opt.zero_grad()
+            sender_loss = -torch.sum(advantages * (dim_log_prob + min_log_prob))
+            sender_loss.backward()
+            sender_opt.step()
 
         # 5b. receiver
         choice_log_prob = choice_dist.log_prob(choice)
