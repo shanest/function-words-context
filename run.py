@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tensorboardX import SummaryWriter  # TODO: is tbX worth it?
 
 
 # TODO: parameterize hidden layers
@@ -40,12 +41,20 @@ class Sender(nn.Module):
 class Receiver(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Receiver, self).__init__()
-        self.fc1 = nn.Linear(context_size * n_dims + 2 + n_dims, 32)
+        self.dim_emb = nn.Linear(n_dims, 8)
+        self.min_emb = nn.Linear(2, 8)
+        self.dim_con = nn.Linear(context_size * n_dims + 8, 32)
+        self.min_con = nn.Linear(context_size * n_dims + 8, 32)
+        self.fc1 = nn.Linear(context_size * n_dims + 64, 32)
         self.fc2 = nn.Linear(32, 32)
         self.fc3 = nn.Linear(32, context_size)
 
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
+    def forward(self, contexts, dim_msg, min_msg):
+        dim_x = self.dim_emb(dim_msg)
+        dim_x = F.relu(self.dim_con(torch.cat([contexts, dim_x], dim=1)))
+        min_x = self.min_emb(min_msg)
+        min_x = F.relu(self.min_con(torch.cat([contexts, min_x], dim=1)))
+        x = F.relu(self.fc1(torch.cat([contexts, dim_x, min_x], dim=1)))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return F.softmax(x, dim=1)
@@ -90,16 +99,40 @@ def apply_perms(contexts, perms, n_dims, batch_size):
     return contexts[np.arange(batch_size)[:, None], perm_idx]
 
 
+def get_dim_and_dir(contexts, n_dims, context_size, one_hot=False):
+    """Gets the dimension and whether it's max/min on that dimension for the
+    first object in a batch of contexts. """
+    batch_size = np.shape(contexts)[0]
+    dims, mins = np.zeros(batch_size), np.zeros(batch_size)
+    for dim in range(n_dims):
+        the_dim = contexts[np.arange(batch_size)[:, None],
+                           np.repeat(np.arange(dim, context_size*n_dims + dim,
+                                               n_dims),
+                                     batch_size, axis=0)]
+        min_dim = np.argmin(the_dim, axis=1)
+        min_dim = (min_dim == 0).astype(int)  # where non-zero
+        max_dim = np.argmax(the_dim, axis=1)
+        max_dim = (max_dim == 0).astype(int)
+        mins += max_dim
+        dims += dim*(min_dim + max_dim)
+
+    if one_hot:
+        dims = np.eye(n_dims)[dims.astype(int)]
+        mins = np.eye(2)[mins.astype(int)]
+
+    return dims, mins
+
+
 if __name__ == '__main__':
 
     # TODO: argparse stuff!
-    n_dims = 1
+    n_dims = 2
     objs = np.arange(0, 1, 1/20)
     # TODO: vary context size, not just 2*NDIMS...
     context_size = 2 * n_dims  # number of objects
 
     batch_size = 16
-    num_batches = 100000
+    num_batches = 50000
 
     sender = Sender(context_size, n_dims)
     receiver = Receiver(context_size, n_dims)
@@ -107,12 +140,16 @@ if __name__ == '__main__':
     sender_opt = torch.optim.Adam(sender.parameters())
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
+    writer = SummaryWriter()
+
     for batch in range(num_batches):
 
         # 1. get contexts from Nature
         contexts = np.stack([get_context(n_dims, objs)
                             for _ in range(batch_size)])
         # batch normalize?
+        # TODO: batch normalize each _dimension_ before combining into
+        # context instead of whole context??
         contexts = (contexts - np.mean(contexts)) / (np.std(contexts) + 1e-12)
 
         # 1a. permute context for receiver
@@ -124,16 +161,21 @@ if __name__ == '__main__':
         target = np.zeros(shape=(batch_size, 1), dtype=np.int64)
         rec_target = rec_perms[np.arange(batch_size)[:, None], target]
 
+        """
         # 2. get signals form sender
         dim_probs, min_probs = sender(torch.Tensor(contexts))
         dim_dist = torch.distributions.OneHotCategorical(dim_probs)
         dim_msg = dim_dist.sample()
         min_dist = torch.distributions.OneHotCategorical(min_probs)
         min_msg = min_dist.sample()
+        """
+        dim_msg, min_msg = get_dim_and_dir(contexts, n_dims, context_size,
+                                           one_hot=True)
+        dim_msg = torch.Tensor(dim_msg)
+        min_msg = torch.Tensor(min_msg)
 
         # 3. get choice from receiver
-        choice_probs = receiver(
-            torch.cat([torch.Tensor(rec_contexts), dim_msg, min_msg], dim=1))
+        choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
 
@@ -144,11 +186,13 @@ if __name__ == '__main__':
                 choice).float(),
             dim=0).detach()
         # reward 1/0 goes to -1/1
-        # advantages = 2*reward.detach() - 1
-        advantages = (reward - reward.mean()) / (reward.std() + 1e-12)
+        # advantages = reward
+        advantages = 2*reward - 1
+        # advantages = (reward - reward.mean()) / (reward.std() + 1e-12)
 
         # 5. compute losses and reinforce
 
+        """
         # 5a. sender
         dim_log_prob = dim_dist.log_prob(dim_msg)
         min_log_prob = min_dist.log_prob(min_msg)
@@ -156,6 +200,7 @@ if __name__ == '__main__':
         sender_loss = -torch.sum(advantages * (dim_log_prob + min_log_prob))
         sender_loss.backward()
         sender_opt.step()
+        """
 
         # 5b. receiver
         choice_log_prob = choice_dist.log_prob(choice)
@@ -169,6 +214,7 @@ if __name__ == '__main__':
         print(torch.cat([dim_msg, min_msg], dim=1))
         print(reward)
         print('% correct: {}'.format(torch.mean(reward)))
+        writer.add_scalar('batch_reward', torch.mean(reward), batch)
 
-    print(list(sender.parameters()))
-    print(list(receiver.parameters()))
+    writer.export_scalars_to_json("./all_scalars.json")
+    writer.close()
