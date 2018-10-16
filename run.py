@@ -41,25 +41,19 @@ class Sender(nn.Module):
 class Receiver(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Receiver, self).__init__()
-        self.dim_emb = nn.Linear(n_dims, 8)
-        self.min_emb = nn.Linear(2, 8)
-        self.dim_con = nn.Linear(context_size * n_dims + n_dims, 32)
-        self.min_con = nn.Linear(context_size * n_dims + 2, 32)
-        self.fc1 = nn.Linear(context_size * n_dims + 64, 32)
-        self.fc2 = nn.Linear(32, 32)
-        self.fc3 = nn.Linear(32, context_size)
+        self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 32)
+        self.fc4 = nn.Linear(32, n_dims)
+        # TODO: currently, predicting feature vals; turn back to one-hot?
 
     def forward(self, contexts, dim_msg, min_msg):
-        # dim_x = self.dim_emb(dim_msg)
-        dim_x = dim_msg
-        dim_x = F.relu(self.dim_con(torch.cat([contexts, dim_x], dim=1)))
-        # min_x = self.min_emb(min_msg)
-        min_x = min_msg
-        min_x = F.relu(self.min_con(torch.cat([contexts, min_x], dim=1)))
-        x = F.relu(self.fc1(torch.cat([contexts, dim_x, min_x], dim=1)))
+        x = F.relu(self.fc1(torch.cat([contexts, dim_msg, min_msg], dim=1)))
         x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return F.softmax(x, dim=1)
+        x = F.relu(self.fc3(x))
+        x = self.fc4(x)
+        # return F.softmax(x, dim=1)
+        return F.sigmoid(x)
 
 
 class LSTMReceiver(nn.Module):
@@ -145,7 +139,7 @@ def get_dim_and_dir(contexts, n_dims, context_size, one_hot=False):
 if __name__ == '__main__':
 
     # TODO: argparse stuff!
-    n_dims = 2
+    n_dims = 4
     objs = np.arange(0, 1, 1/20)
     # TODO: vary context size, not just 2*NDIMS...
     context_size = 2 * n_dims  # number of objects
@@ -158,7 +152,7 @@ if __name__ == '__main__':
         sender = Sender(context_size, n_dims)
         sender_opt = torch.optim.Adam(sender.parameters())
 
-    receiver = LSTMReceiver(context_size, n_dims)
+    receiver = Receiver(context_size, n_dims)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
     writer = SummaryWriter()
@@ -171,7 +165,7 @@ if __name__ == '__main__':
         # batch normalize?
         # TODO: batch normalize each _dimension_ before combining into
         # context instead of whole context??
-        contexts = (contexts - np.mean(contexts)) / (np.std(contexts) + 1e-12)
+        # contexts = (contexts - np.mean(contexts)) / (np.std(contexts) + 1e-12)
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
@@ -197,6 +191,7 @@ if __name__ == '__main__':
 
         # 3. get choice from receiver
         choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
+        """
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
         print(choice)
@@ -209,8 +204,9 @@ if __name__ == '__main__':
             dim=0).detach()
         # reward 1/0 goes to -1/1
         # advantages = reward
-        # advantages = 2*reward - 1
-        advantages = (reward - reward.mean()) / (reward.std() + 1e-12)
+        advantages = 2*reward - 1
+        # advantages = (reward - reward.mean()) / (reward.std() + 1e-12)
+        """
 
         # 5. compute losses and reinforce
 
@@ -224,18 +220,24 @@ if __name__ == '__main__':
             sender_opt.step()
 
         # 5b. receiver
-        choice_log_prob = choice_dist.log_prob(choice)
+        # choice_log_prob = choice_dist.log_prob(choice)
         receiver_opt.zero_grad()
-        receiver_loss = -torch.sum(advantages * choice_log_prob)
+        # receiver_loss = -torch.sum(advantages * choice_log_prob)
+        # receiver_loss = F.cross_entropy(choice_probs, torch.Tensor(rec_target.flatten()).long())
+        receiver_loss = F.mse_loss(choice_probs, torch.Tensor(
+            contexts[np.arange(batch_size)[:, None],
+                     np.repeat(np.arange(n_dims)[None, :],
+                               batch_size, axis=0)]
+        ))
         receiver_loss.backward()
         receiver_opt.step()
 
         print('\nIteration: {}'.format(batch))
         print(contexts)
         print(torch.cat([dim_msg, min_msg], dim=1))
+        print(choice_probs)
+        print(receiver_loss)
+        """
         print(reward)
         print('% correct: {}'.format(torch.mean(reward)))
-        writer.add_scalar('batch_reward', torch.mean(reward), batch)
-
-    writer.export_scalars_to_json("./all_scalars.json")
-    writer.close()
+        """
