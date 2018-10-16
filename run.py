@@ -43,21 +43,40 @@ class Receiver(nn.Module):
         super(Receiver, self).__init__()
         self.dim_emb = nn.Linear(n_dims, 8)
         self.min_emb = nn.Linear(2, 8)
-        self.dim_con = nn.Linear(context_size * n_dims + 8, 32)
-        self.min_con = nn.Linear(context_size * n_dims + 8, 32)
+        self.dim_con = nn.Linear(context_size * n_dims + n_dims, 32)
+        self.min_con = nn.Linear(context_size * n_dims + 2, 32)
         self.fc1 = nn.Linear(context_size * n_dims + 64, 32)
         self.fc2 = nn.Linear(32, 32)
         self.fc3 = nn.Linear(32, context_size)
 
     def forward(self, contexts, dim_msg, min_msg):
-        dim_x = self.dim_emb(dim_msg)
+        # dim_x = self.dim_emb(dim_msg)
+        dim_x = dim_msg
         dim_x = F.relu(self.dim_con(torch.cat([contexts, dim_x], dim=1)))
-        min_x = self.min_emb(min_msg)
+        # min_x = self.min_emb(min_msg)
+        min_x = min_msg
         min_x = F.relu(self.min_con(torch.cat([contexts, min_x], dim=1)))
         x = F.relu(self.fc1(torch.cat([contexts, dim_x, min_x], dim=1)))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return F.softmax(x, dim=1)
+
+
+class LSTMReceiver(nn.Module):
+
+    def __init__(self, context_size, n_dims):
+        super(LSTMReceiver, self).__init__()
+        # TODO: update to when n_dims != 2; need to make min_msg and dim_msg
+        # have same dimensionality
+        self.cell = nn.LSTMCell(context_size * n_dims + n_dims, 32)
+        self.fc = nn.Linear(32, context_size)
+
+    def forward(self, contexts, dim_msg, min_msg):
+        # no initial h, c = default 0
+        hx, cx = self.cell(torch.cat([contexts, dim_msg], dim=1))
+        hx, cx = self.cell(torch.cat([contexts, min_msg], dim=1), (hx, cx))
+        out = self.fc(hx)
+        return F.softmax(out, dim=1)
 
 
 def get_context(n_dims, scale):
@@ -82,7 +101,7 @@ def get_context(n_dims, scale):
     objs = np.array(objs)
     objs = np.transpose(objs)
     np.random.shuffle(objs)
-    return np.array(objs).flatten()
+    return objs.flatten()
 
 
 def get_permutations(batch_size, context_size):
@@ -130,7 +149,7 @@ if __name__ == '__main__':
     objs = np.arange(0, 1, 1/20)
     # TODO: vary context size, not just 2*NDIMS...
     context_size = 2 * n_dims  # number of objects
-    fixed_sender = False
+    fixed_sender = True
 
     batch_size = 16
     num_batches = 50000
@@ -139,7 +158,7 @@ if __name__ == '__main__':
         sender = Sender(context_size, n_dims)
         sender_opt = torch.optim.Adam(sender.parameters())
 
-    receiver = Receiver(context_size, n_dims)
+    receiver = LSTMReceiver(context_size, n_dims)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
     writer = SummaryWriter()
@@ -180,6 +199,7 @@ if __name__ == '__main__':
         choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
+        print(choice)
 
         # 4. get reward
         reward = torch.unsqueeze(
@@ -189,8 +209,8 @@ if __name__ == '__main__':
             dim=0).detach()
         # reward 1/0 goes to -1/1
         # advantages = reward
-        advantages = 2*reward - 1
-        # advantages = (reward - reward.mean()) / (reward.std() + 1e-12)
+        # advantages = 2*reward - 1
+        advantages = (reward - reward.mean()) / (reward.std() + 1e-12)
 
         # 5. compute losses and reinforce
 
