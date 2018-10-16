@@ -118,10 +118,23 @@ def get_dim_and_dir(contexts, n_dims, context_size, one_hot=False):
     return dims, mins
 
 
+def get_communicative_success(contexts, objs, n_dims):
+    """Checks whether a predicted object (as values in each dimension) is
+    closer to the first object in context or not. """
+    n_objs = int(np.shape(contexts)[1] / np.shape(objs)[1])
+    context_objs = np.reshape(contexts, (-1, n_dims))
+    repeat_objs = np.repeat(objs, n_objs, axis=0)
+    mse_per_obj = np.reshape(
+        np.mean((context_objs - repeat_objs)**2, axis=1),
+        (-1, n_objs))
+    predicted_obj = np.argmin(mse_per_obj, axis=1)[:, None]
+    return (predicted_obj == 0).astype(int)
+
+
 if __name__ == '__main__':
 
     # TODO: argparse stuff!
-    n_dims = 3
+    n_dims = 2
     objs = np.arange(0, 1, 1/20)
     # TODO: vary context size, not just 2*NDIMS...
     context_size = 2 * n_dims  # number of objects
@@ -219,7 +232,6 @@ if __name__ == '__main__':
         print(torch.cat([dim_msg, min_msg], dim=1))
         print(choice_obj)
         print(receiver_loss)
-        """
-        print(reward)
-        print('% correct: {}'.format(torch.mean(reward)))
-        """
+        comm_succ = get_communicative_success(contexts,
+                                              choice_obj.data.numpy(), n_dims)
+        print('% correct: {}'.format(np.mean(comm_succ)))
