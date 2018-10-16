@@ -16,7 +16,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from tensorboardX import SummaryWriter  # TODO: is tbX worth it?
 
 
 # TODO: parameterize hidden layers
@@ -137,8 +136,6 @@ if __name__ == '__main__':
 
     receiver = Receiver(context_size, n_dims)
     receiver_opt = torch.optim.Adam(receiver.parameters())
-
-    writer = SummaryWriter()
 
     for batch in range(num_batches):
 
