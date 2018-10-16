@@ -122,13 +122,13 @@ def get_dim_and_dir(contexts, n_dims, context_size, one_hot=False):
 if __name__ == '__main__':
 
     # TODO: argparse stuff!
-    n_dims = 1
+    n_dims = 3
     objs = np.arange(0, 1, 1/20)
     # TODO: vary context size, not just 2*NDIMS...
     context_size = 2 * n_dims  # number of objects
     fixed_sender = False
 
-    batch_size = 16
+    batch_size = 32
     num_batches = 50000
 
     if not fixed_sender:
@@ -179,7 +179,8 @@ if __name__ == '__main__':
 
         # 3. get choice from receiver
         choice_obj = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
-        choice_mse = F.mse_loss(choice_obj, target_obj)
+        choice_mse = F.mse_loss(choice_obj, target_obj,
+                                reduce=False).mean(dim=1)
 
         # 4. get reward
         """
@@ -193,8 +194,8 @@ if __name__ == '__main__':
         advantages = 2*reward - 1
         """
         reward = -choice_mse.detach()
-        advantages = reward
-        # advantages = (reward - reward.mean()) / (reward.std() + 1e-12)
+        # advantages = reward
+        advantages = (reward - reward.mean()) / (reward.std() + 1e-8)
 
         # 5. compute losses and reinforce
 
@@ -212,7 +213,7 @@ if __name__ == '__main__':
         receiver_opt.zero_grad()
         # receiver_loss = -torch.sum(advantages * choice_log_prob)
         # receiver_loss = F.cross_entropy(choice_probs, torch.Tensor(rec_target.flatten()).long())
-        receiver_loss = choice_mse
+        receiver_loss = choice_mse.mean()
         receiver_loss.backward()
         receiver_opt.step()
 
