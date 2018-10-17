@@ -182,7 +182,6 @@ if __name__ == '__main__':
         rec_contexts = apply_perms(contexts, rec_perms, n_dims, batch_size)
         # 1b. get correct target index based on perms
         target = np.zeros(shape=(batch_size, 1), dtype=np.int64)
-        # rec_target = rec_perms[np.arange(batch_size)[:, None], target]
         rec_target = np.where(rec_perms == 0)[1][:, None]
 
         # 2. get signals form sender
@@ -200,8 +199,6 @@ if __name__ == '__main__':
 
         # 3. get choice from receiver
         choice_objs, choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
-        # TODO: is there a bug???? super low MSE, but super high prob for the
-        # wrong object?
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
 
@@ -209,18 +206,10 @@ if __name__ == '__main__':
         reward = torch.eq(
                 torch.from_numpy(rec_target.flatten()),
                 choice).float().detach()
-        # TODO: use MSE also for sender or not?
-        choice_mse = F.mse_loss(choice_objs, target_obj,
-                                reduce=False).mean(dim=1)
-        combo_reward = reward - choice_mse.detach()
-        """
-        reward = -choice_mse.detach()
-        """
         # reward 1/0 goes to -1/1
-        # advantages = reward
+        advantages = reward
         # advantages = 2*reward - 1
-        advantages = (combo_reward - combo_reward.mean()) / (combo_reward.std() + 1e-8)
-        advantages = -choice_mse.detach()
+        # advantages = reward - reward.mean() / (reward.std() + 1e-8)
 
         # 5. compute losses and reinforce
 
@@ -237,7 +226,7 @@ if __name__ == '__main__':
         receiver_opt.zero_grad()
         choice_log_prob = choice_dist.log_prob(choice)
         receiver_reinforce = -torch.sum(advantages * choice_log_prob)
-        receiver_mse = choice_mse.mean()
+        receiver_mse = F.mse_loss(choice_objs, target_obj)
         receiver_loss = receiver_mse
         receiver_loss.backward()
         receiver_opt.step()
