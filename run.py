@@ -41,18 +41,27 @@ class Receiver(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Receiver, self).__init__()
         self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2, 64)
-        self.fc2 = nn.Linear(64, 64)
+        # self.fc2 = nn.Linear(64, 64)
         self.fc3 = nn.Linear(64, 32)
-        self.fc4 = nn.Linear(32, n_dims)
+        self.obj_layer = nn.Linear(32, n_dims)
+        self.label_layer = nn.Linear(context_size * n_dims + n_dims,
+                                     context_size)
         # TODO: currently, predicting feature vals; turn back to one-hot?
+        self.context_size = context_size
+        self.n_dims = n_dims
 
     def forward(self, contexts, dim_msg, min_msg):
         x = F.relu(self.fc1(torch.cat([contexts, dim_msg, min_msg], dim=1)))
-        x = F.relu(self.fc2(x))
+        # x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
-        x = self.fc4(x)
-        # return F.softmax(x, dim=1)
-        return F.sigmoid(x)
+        obj = self.obj_layer(x)
+        # label = self.label_layer(torch.cat([contexts, obj.detach()], dim=1))
+        # TODO: replace this with cosine similarity w/ each object?
+        dot_prep = -(obj.repeat((1, self.context_size)) - contexts)**2
+        dot_per_obj = dot_prep.view((-1, self.n_dims)).sum(dim=1)
+        dot_by_context = dot_per_obj.reshape((-1, self.context_size))
+        # return obj
+        return obj, F.softmax(dot_by_context / 1, dim=1)
 
 
 def get_context(n_dims, scale):
@@ -127,6 +136,7 @@ def get_communicative_success(contexts, objs, n_dims):
     mse_per_obj = np.reshape(
         np.mean((context_objs - repeat_objs)**2, axis=1),
         (-1, n_objs))
+    # dot_per_obj = np.sum(context_objs * repeat_objs, axis=1)[:, None]
     predicted_obj = np.argmin(mse_per_obj, axis=1)[:, None]
     return (predicted_obj == 0).astype(int)
 
@@ -135,12 +145,12 @@ if __name__ == '__main__':
 
     # TODO: argparse stuff!
     n_dims = 2
-    objs = np.arange(0, 1, 1/20)
+    objs = np.arange(-10, 10, 2)
     # TODO: vary context size, not just 2*NDIMS...
     context_size = 2 * n_dims  # number of objects
     fixed_sender = False
 
-    batch_size = 32
+    batch_size = 16
     num_batches = 50000
 
     if not fixed_sender:
@@ -155,15 +165,15 @@ if __name__ == '__main__':
         # 1. get contexts and target object from Nature
         contexts = np.stack([get_context(n_dims, objs)
                             for _ in range(batch_size)])
+        # batch normalize?
+        # TODO: batch normalize each _dimension_ before combining into
+        # context instead of whole context??
+        # contexts = (contexts - np.mean(contexts)) / (np.std(contexts) + 1e-12)
         target_obj = torch.Tensor(
             contexts[np.arange(batch_size)[:, None],
                      np.repeat(np.arange(n_dims)[None, :],
                                batch_size, axis=0)]
         )
-        # batch normalize?
-        # TODO: batch normalize each _dimension_ before combining into
-        # context instead of whole context??
-        # contexts = (contexts - np.mean(contexts)) / (np.std(contexts) + 1e-12)
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
@@ -172,7 +182,8 @@ if __name__ == '__main__':
         rec_contexts = apply_perms(contexts, rec_perms, n_dims, batch_size)
         # 1b. get correct target index based on perms
         target = np.zeros(shape=(batch_size, 1), dtype=np.int64)
-        rec_target = rec_perms[np.arange(batch_size)[:, None], target]
+        # rec_target = rec_perms[np.arange(batch_size)[:, None], target]
+        rec_target = np.where(rec_perms == 0)[1][:, None]
 
         # 2. get signals form sender
         if fixed_sender:
@@ -188,24 +199,28 @@ if __name__ == '__main__':
             min_msg = min_dist.sample()
 
         # 3. get choice from receiver
-        choice_obj = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
-        choice_mse = F.mse_loss(choice_obj, target_obj,
-                                reduce=False).mean(dim=1)
+        choice_objs, choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
+        # TODO: is there a bug???? super low MSE, but super high prob for the
+        # wrong object?
+        choice_dist = torch.distributions.Categorical(choice_probs)
+        choice = choice_dist.sample()
 
         # 4. get reward
-        """
-        reward = torch.unsqueeze(
-            torch.eq(
+        reward = torch.eq(
                 torch.from_numpy(rec_target.flatten()),
-                choice).float(),
-            dim=0).detach()
-        # reward 1/0 goes to -1/1
-        # advantages = reward
-        advantages = 2*reward - 1
+                choice).float().detach()
+        # TODO: use MSE also for sender or not?
+        choice_mse = F.mse_loss(choice_objs, target_obj,
+                                reduce=False).mean(dim=1)
+        combo_reward = reward - choice_mse.detach()
         """
         reward = -choice_mse.detach()
+        """
+        # reward 1/0 goes to -1/1
         # advantages = reward
-        advantages = (reward - reward.mean()) / (reward.std() + 1e-8)
+        # advantages = 2*reward - 1
+        advantages = (combo_reward - combo_reward.mean()) / (combo_reward.std() + 1e-8)
+        advantages = -choice_mse.detach()
 
         # 5. compute losses and reinforce
 
@@ -219,19 +234,27 @@ if __name__ == '__main__':
             sender_opt.step()
 
         # 5b. receiver
-        # choice_log_prob = choice_dist.log_prob(choice)
         receiver_opt.zero_grad()
-        # receiver_loss = -torch.sum(advantages * choice_log_prob)
-        # receiver_loss = F.cross_entropy(choice_probs, torch.Tensor(rec_target.flatten()).long())
-        receiver_loss = choice_mse.mean()
+        choice_log_prob = choice_dist.log_prob(choice)
+        receiver_reinforce = -torch.sum(advantages * choice_log_prob)
+        receiver_mse = choice_mse.mean()
+        receiver_loss = receiver_mse
         receiver_loss.backward()
         receiver_opt.step()
 
         print('\nIteration: {}'.format(batch))
         print(contexts)
         print(torch.cat([dim_msg, min_msg], dim=1))
-        print(choice_obj)
-        print(receiver_loss)
+        print(choice_objs)
+        print(choice_probs)
+        print(rec_target)
+        # print(choice_obj)
+        # print(receiver_loss)
+        print(reward)
+        print(receiver_mse)
+        print('% correct: {}'.format(torch.mean(reward)))
+        """
         comm_succ = get_communicative_success(contexts,
                                               choice_obj.data.numpy(), n_dims)
         print('% correct: {}'.format(np.mean(comm_succ)))
+        """
