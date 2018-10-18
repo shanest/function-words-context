@@ -40,23 +40,16 @@ class Sender(nn.Module):
 class Receiver(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Receiver, self).__init__()
+        # TODO: parameterize more based on n_dims? doesn't work for > 2
         self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2, 64)
-        # self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, 32)
-        # self.fc4 = nn.Linear(64, context_size)
+        self.fc2 = nn.Linear(64, 32)
         self.obj_layer = nn.Linear(32, n_dims)
-        # TODO: currently, predicting feature vals; turn back to one-hot?
         self.context_size = context_size
         self.n_dims = n_dims
 
     def forward(self, contexts, dim_msg, min_msg):
         x = F.relu(self.fc1(torch.cat([contexts, dim_msg, min_msg], dim=1)))
-        # x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        """
-        x = self.fc4(x)
-        return F.softmax(x, dim=1)
-        """
+        x = F.relu(self.fc2(x))
         obj = self.obj_layer(x)
         init_comp = -(obj.repeat((1, self.context_size)) - contexts)**2
         comp_per_obj = init_comp.view((-1, self.n_dims)).sum(dim=1)
@@ -90,7 +83,6 @@ def get_context(n_dims, scale):
 
 
 def get_permutations(batch_size, context_size):
-
     return np.stack([np.random.permutation(context_size)
                      for _ in range(batch_size)])
 
@@ -165,10 +157,6 @@ if __name__ == '__main__':
         # 1. get contexts and target object from Nature
         contexts = np.stack([get_context(n_dims, objs)
                             for _ in range(batch_size)])
-        # batch normalize?
-        # TODO: batch normalize each _dimension_ before combining into
-        # context instead of whole context??
-        # contexts = (contexts - np.mean(contexts)) / (np.std(contexts) + 1e-12)
         target_obj = torch.Tensor(
             contexts[np.arange(batch_size)[:, None],
                      np.repeat(np.arange(n_dims)[None, :],
@@ -199,7 +187,6 @@ if __name__ == '__main__':
 
         # 3. get choice from receiver
         choice_objs, choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
-        # choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
 
@@ -207,8 +194,8 @@ if __name__ == '__main__':
         reward = torch.eq(
                 torch.from_numpy(rec_target.flatten()),
                 choice).float().detach()
-        # reward 1/0 goes to -1/1
         advantages = reward
+        # reward 1/0 goes to -1/1
         # advantages = 2*reward - 1
         # advantages = reward - reward.mean() / (reward.std() + 1e-8)
 
@@ -227,7 +214,7 @@ if __name__ == '__main__':
         receiver_opt.zero_grad()
         choice_log_prob = choice_dist.log_prob(choice)
         receiver_reinforce = -torch.sum(advantages * choice_log_prob)
-        # receiver_mse = F.mse_loss(choice_objs, target_obj)
+        receiver_mse = F.mse_loss(choice_objs, target_obj)
         receiver_loss = receiver_reinforce
         receiver_loss.backward()
         receiver_opt.step()
@@ -235,8 +222,6 @@ if __name__ == '__main__':
         print('\nIteration: {}'.format(batch))
         print(contexts)
         print(torch.cat([dim_msg, min_msg], dim=1))
-        # print(choice_objs)
-        # print(receiver_mse)
-        # print(receiver_loss)
+        print(receiver_mse)
         print(reward)
         print('% correct: {}'.format(torch.mean(reward)))
