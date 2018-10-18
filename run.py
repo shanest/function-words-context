@@ -43,9 +43,8 @@ class Receiver(nn.Module):
         self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2, 64)
         # self.fc2 = nn.Linear(64, 64)
         self.fc3 = nn.Linear(64, 32)
+        # self.fc4 = nn.Linear(64, context_size)
         self.obj_layer = nn.Linear(32, n_dims)
-        self.label_layer = nn.Linear(context_size * n_dims + n_dims,
-                                     context_size)
         # TODO: currently, predicting feature vals; turn back to one-hot?
         self.context_size = context_size
         self.n_dims = n_dims
@@ -54,14 +53,15 @@ class Receiver(nn.Module):
         x = F.relu(self.fc1(torch.cat([contexts, dim_msg, min_msg], dim=1)))
         # x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
+        """
+        x = self.fc4(x)
+        return F.softmax(x, dim=1)
+        """
         obj = self.obj_layer(x)
-        # label = self.label_layer(torch.cat([contexts, obj.detach()], dim=1))
-        # TODO: replace this with cosine similarity w/ each object?
-        dot_prep = -(obj.repeat((1, self.context_size)) - contexts)**2
-        dot_per_obj = dot_prep.view((-1, self.n_dims)).sum(dim=1)
-        dot_by_context = dot_per_obj.reshape((-1, self.context_size))
-        # return obj
-        return obj, F.softmax(dot_by_context / 1, dim=1)
+        init_comp = -(obj.repeat((1, self.context_size)) - contexts)**2
+        comp_per_obj = init_comp.view((-1, self.n_dims)).sum(dim=1)
+        comp_by_context = comp_per_obj.reshape((-1, self.context_size))
+        return obj, F.softmax(comp_by_context, dim=1)
 
 
 def get_context(n_dims, scale):
@@ -150,7 +150,7 @@ if __name__ == '__main__':
     context_size = 2 * n_dims  # number of objects
     fixed_sender = False
 
-    batch_size = 16
+    batch_size = 32
     num_batches = 50000
 
     if not fixed_sender:
@@ -199,6 +199,7 @@ if __name__ == '__main__':
 
         # 3. get choice from receiver
         choice_objs, choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
+        # choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
 
@@ -226,24 +227,16 @@ if __name__ == '__main__':
         receiver_opt.zero_grad()
         choice_log_prob = choice_dist.log_prob(choice)
         receiver_reinforce = -torch.sum(advantages * choice_log_prob)
-        receiver_mse = F.mse_loss(choice_objs, target_obj)
-        receiver_loss = receiver_mse
+        # receiver_mse = F.mse_loss(choice_objs, target_obj)
+        receiver_loss = receiver_reinforce
         receiver_loss.backward()
         receiver_opt.step()
 
         print('\nIteration: {}'.format(batch))
         print(contexts)
         print(torch.cat([dim_msg, min_msg], dim=1))
-        print(choice_objs)
-        print(choice_probs)
-        print(rec_target)
-        # print(choice_obj)
+        # print(choice_objs)
+        # print(receiver_mse)
         # print(receiver_loss)
         print(reward)
-        print(receiver_mse)
         print('% correct: {}'.format(torch.mean(reward)))
-        """
-        comm_succ = get_communicative_success(contexts,
-                                              choice_obj.data.numpy(), n_dims)
-        print('% correct: {}'.format(np.mean(comm_succ)))
-        """
