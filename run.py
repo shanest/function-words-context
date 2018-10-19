@@ -110,8 +110,7 @@ def run_trial(num, out_dir, sender=None, receiver=None,
     receiver = models.Receiver(context_size, n_dims)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
-    for batch in range(num_batches):
-
+    def one_batch(batch_size):
         # 1. get contexts and target object from Nature
         contexts = np.stack([get_context(n_dims, objs)
                             for _ in range(batch_size)])
@@ -153,13 +152,19 @@ def run_trial(num, out_dir, sender=None, receiver=None,
         reward = torch.eq(
                 torch.from_numpy(rec_target.flatten()),
                 choice).float().detach()
+
+        return (contexts, msg_dists, msgs, choice_dist, choice, reward,
+                choice_objs, target_obj)
+
+    for batch in range(num_batches):
+        (contexts, msg_dists, msgs, choice_dist, choice, reward, choice_objs,
+         target_obj) = one_batch(batch_size)
         advantages = reward
         # reward 1/0 goes to -1/1
         # advantages = 2*reward - 1
         # advantages = reward - reward.mean() / (reward.std() + 1e-8)
 
         # 5. compute losses and reinforce
-
         # 5a. sender
         if not fixed_sender:
             sender_opt.zero_grad()
@@ -184,13 +189,14 @@ def run_trial(num, out_dir, sender=None, receiver=None,
             print('\nIteration: {}'.format(batch))
             print(contexts)
             # print(choice_objs)
-            print(msgs_in)
+            print(msgs)
             print(receiver_mse)
             print(reward)
             percent = torch.mean(reward).data.item()
             print('% correct: {}'.format(percent))
-            data.append({'batch_num': batch, 'percent_correct': percent},
-                        ignore_index=True)
+            data = data.append(
+                {'batch_num': batch, 'percent_correct': percent},
+                ignore_index=True)
 
     out_root = '{}/trial_{}/'.format(out_dir, trial)
     if not os.path.exists(out_root):
@@ -203,6 +209,8 @@ def run_trial(num, out_dir, sender=None, receiver=None,
         torch.save(receiver.state_dict(), out_root + 'receiver.pt')
 
     # TODO: TEST!
+    if num_test:
+        contexts, _, msgs, _, choice, reward, _, _ = one_batch(num_test)
 
 
 if __name__ == '__main__':
