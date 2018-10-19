@@ -78,7 +78,7 @@ def get_dim_and_dir(contexts, n_dims, context_size, one_hot=False):
         dims = np.eye(n_dims)[dims.astype(int)]
         mins = np.eye(2)[mins.astype(int)]
 
-    return dims, mins
+    return dims.astype(int), mins.astype(int)
 
 
 def get_communicative_success(contexts, objs, n_dims):
@@ -208,16 +208,24 @@ def run_trial(num, out_dir, sender=None, receiver=None,
         torch.save(sender.state_dict(), out_root + 'sender.pt')
         torch.save(receiver.state_dict(), out_root + 'receiver.pt')
 
-    # TODO: TEST!
     if num_test:
         contexts, _, msgs, _, choice, reward, _, _ = one_batch(num_test)
         true_dims, true_mins = get_dim_and_dir(contexts, n_dims, context_size)
         # TODO: record more? whole context, other features of it?
         test_data = pd.DataFrame({'true_dim': true_dims,
                                   'true_mins': true_mins,
-                                  'correct': reward})
+                                  'correct': reward.numpy().astype(int)})
+        test_data['true_total'] = (test_data['true_dim'] +
+                                   n_dims*test_data['true_mins'])
         for idx in range(len(msgs)):
             test_data['msg_' + str(idx)] = np.argmax(msgs[idx].numpy(), axis=1)
+        # TODO: document!
+        msg_col = test_data['msg_0']
+        for idx in range(1, len(msgs)):
+            msg_col = (msg_col +
+                       (test_data['msg_'+str(idx-1)].max() + 1) *
+                       test_data['msg_'+str(idx)])
+        test_data['total_msg'] = msg_col
         test_data.to_csv(out_root + 'test.csv')
 
 
