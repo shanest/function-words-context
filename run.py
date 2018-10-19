@@ -11,10 +11,11 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 """
-
+import os
 import numpy as np
 import torch
 import torch.nn.functional as F
+import pandas as pd
 import models
 
 
@@ -96,9 +97,11 @@ def get_communicative_success(contexts, objs, n_dims):
 
 def run_trial(num, out_dir, sender=None, receiver=None,
               n_dims=2, objs=np.arange(-1, 1, 1/5), fixed_sender=False,
-              batch_size=32, num_batches=50000, record_every=50):
+              batch_size=32, num_batches=15000, record_every=50,
+              save_models=True, num_test=5000):
 
     context_size = 2*n_dims  # TODO: modify get_context, allow to vary
+    data = pd.DataFrame(columns=['batch_num', 'percent_correct'])
 
     if not fixed_sender:
         sender = models.Sender(context_size, n_dims)
@@ -184,7 +187,22 @@ def run_trial(num, out_dir, sender=None, receiver=None,
             print(msgs_in)
             print(receiver_mse)
             print(reward)
-            print('% correct: {}'.format(torch.mean(reward)))
+            percent = torch.mean(reward).data.item()
+            print('% correct: {}'.format(percent))
+            data.append({'batch_num': batch, 'percent_correct': percent},
+                        ignore_index=True)
+
+    out_root = '{}/trial_{}/'.format(out_dir, trial)
+    if not os.path.exists(out_root):
+        os.makedirs(out_root)
+
+    data.to_csv(out_root + 'train.csv')
+
+    if save_models:
+        torch.save(sender.state_dict(), out_root + 'sender.pt')
+        torch.save(receiver.state_dict(), out_root + 'receiver.pt')
+
+    # TODO: TEST!
 
 
 if __name__ == '__main__':

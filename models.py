@@ -55,3 +55,6 @@ class Receiver(nn.Module):
         comp_per_obj = 1 / torch.sqrt(comp_per_obj)
         comp_by_context = comp_per_obj.reshape((-1, self.context_size))
         return obj, F.softmax(comp_by_context / 0.2, dim=1)
+
+
+# TODO: implement RNN sender and receiver!
