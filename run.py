@@ -189,7 +189,7 @@ def run_trial(num, out_dir, sender=None, receiver=None,
             print('\nIteration: {}'.format(batch))
             print(contexts)
             # print(choice_objs)
-            print(msgs)
+            print(torch.cat(msgs, dim=1))
             print(receiver_mse)
             print(reward)
             percent = torch.mean(reward).data.item()
@@ -211,6 +211,14 @@ def run_trial(num, out_dir, sender=None, receiver=None,
     # TODO: TEST!
     if num_test:
         contexts, _, msgs, _, choice, reward, _, _ = one_batch(num_test)
+        true_dims, true_mins = get_dim_and_dir(contexts, n_dims, context_size)
+        # TODO: record more? whole context, other features of it?
+        test_data = pd.DataFrame({'true_dim': true_dims,
+                                  'true_mins': true_mins,
+                                  'correct': reward})
+        for idx in range(len(msgs)):
+            test_data['msg_' + str(idx)] = np.argmax(msgs[idx].numpy(), axis=1)
+        test_data.to_csv(out_root + 'test.csv')
 
 
 if __name__ == '__main__':
