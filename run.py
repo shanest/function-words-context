@@ -11,6 +11,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 """
+import argparse
 import os
 import numpy as np
 import torch
@@ -98,7 +99,7 @@ def get_communicative_success(contexts, objs, n_dims):
 def run_trial(num, out_dir, sender=None, receiver=None,
               n_dims=2, objs=np.arange(-1, 1, 1/5), fixed_sender=False,
               batch_size=32, num_batches=15000, record_every=50,
-              save_models=True, num_test=5000):
+              save_models=True, num_test=5000, **kwargs):
 
     context_size = 2*n_dims  # TODO: modify get_context, allow to vary
     data = pd.DataFrame(columns=['batch_num', 'percent_correct'])
@@ -231,6 +232,14 @@ def run_trial(num, out_dir, sender=None, receiver=None,
 
 if __name__ == '__main__':
 
-    num_trials = 1
-    for trial in range(num_trials):
-        run_trial(trial, './test')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--num_trials', type=int, default=1)
+    parser.add_argument('--out_path', type=str, default='../data/')
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--num_batches', type=int, default=50000)
+    parser.add_argument('--record_every', type=int, default=50)
+    parser.add_argument('--num_test', type=int, default=5000)
+    args = parser.parse_args()
+
+    for trial in range(args.num_trials):
+        run_trial(trial, args.out_path, **vars(args))
