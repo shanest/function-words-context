@@ -14,7 +14,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import models
 
@@ -95,17 +94,11 @@ def get_communicative_success(contexts, objs, n_dims):
     return (predicted_obj == 0).astype(int)
 
 
-if __name__ == '__main__':
+def run_trial(num, out_dir, sender=None, receiver=None,
+              n_dims=2, objs=np.arange(-1, 1, 1/5), fixed_sender=False,
+              batch_size=32, num_batches=50000, record_every=50):
 
-    # TODO: argparse stuff!
-    n_dims = 2
-    objs = np.arange(-1, 1, 1/5)
-    # TODO: vary context size, not just 2*NDIMS...
-    context_size = 2 * n_dims  # number of objects
-    fixed_sender = False
-
-    batch_size = 32
-    num_batches = 50000
+    context_size = 2*n_dims  # TODO: modify get_context, allow to vary
 
     if not fixed_sender:
         sender = models.Sender(context_size, n_dims)
@@ -131,11 +124,13 @@ if __name__ == '__main__':
         rec_perms = get_permutations(batch_size, context_size)
         rec_contexts = apply_perms(contexts, rec_perms, n_dims, batch_size)
         # 1b. get correct target index based on perms
-        target = np.zeros(shape=(batch_size, 1), dtype=np.int64)
         rec_target = np.where(rec_perms == 0)[1][:, None]
 
         # 2. get signals form sender
         if fixed_sender:
+            # TODO: implement FixedSender as a nn.Module in models, so that the
+            # code can be maximally modular?  Would require returning
+            # ``probabilities'' and wasting compute time ``training'' it
             msgs = get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)
             msgs_in = torch.cat([torch.Tensor(msg) for msg in msgs], dim=1)
         else:
@@ -182,7 +177,7 @@ if __name__ == '__main__':
         receiver_loss.backward()
         receiver_opt.step()
 
-        if batch % 50 == 0:
+        if batch % record_every == 0:
             print('\nIteration: {}'.format(batch))
             print(contexts)
             # print(choice_objs)
@@ -190,3 +185,10 @@ if __name__ == '__main__':
             print(receiver_mse)
             print(reward)
             print('% correct: {}'.format(torch.mean(reward)))
+
+
+if __name__ == '__main__':
+
+    num_trials = 1
+    for trial in range(num_trials):
+        run_trial(trial, './test')
