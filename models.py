@@ -45,8 +45,8 @@ class Receiver(nn.Module):
         self.context_size = context_size
         self.n_dims = n_dims
 
-    def forward(self, contexts, dim_msg, min_msg):
-        x = F.relu(self.fc1(torch.cat([contexts, dim_msg, min_msg], dim=1)))
+    def forward(self, contexts, msgs):
+        x = F.relu(self.fc1(torch.cat([contexts, msgs], dim=1)))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         obj = self.obj_layer(x)

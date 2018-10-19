@@ -136,19 +136,18 @@ if __name__ == '__main__':
 
         # 2. get signals form sender
         if fixed_sender:
-            dim_msg, min_msg = get_dim_and_dir(contexts, n_dims, context_size,
-                                               one_hot=True)
-            dim_msg = torch.Tensor(dim_msg)
-            min_msg = torch.Tensor(min_msg)
+            msgs = get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)
+            msgs_in = torch.cat([torch.Tensor(msg) for msg in msgs], dim=1)
         else:
-            dim_probs, min_probs = sender(torch.Tensor(contexts))
-            dim_dist = torch.distributions.OneHotCategorical(dim_probs)
-            dim_msg = dim_dist.sample()
-            min_dist = torch.distributions.OneHotCategorical(min_probs)
-            min_msg = min_dist.sample()
+            msg_probs = sender(torch.Tensor(contexts))
+            msg_dists = [torch.distributions.OneHotCategorical(probs)
+                         for probs in msg_probs]
+            msgs = [dist.sample() for dist in msg_dists]
+            msgs_in = torch.cat(msgs, dim=1)
 
         # 3. get choice from receiver
-        choice_objs, choice_probs = receiver(torch.Tensor(rec_contexts), dim_msg, min_msg)
+        choice_objs, choice_probs = receiver(torch.Tensor(rec_contexts),
+                                             msgs_in)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
 
@@ -165,10 +164,12 @@ if __name__ == '__main__':
 
         # 5a. sender
         if not fixed_sender:
-            dim_log_prob = dim_dist.log_prob(dim_msg)
-            min_log_prob = min_dist.log_prob(min_msg)
             sender_opt.zero_grad()
-            sender_loss = -torch.sum(advantages * (dim_log_prob + min_log_prob))
+            msg_log_probs = [msg_dists[idx].log_prob(msgs[idx])
+                             for idx in range(len(msgs))]
+            sender_loss = -torch.sum(
+                advantages *
+                torch.sum(torch.stack(msg_log_probs, dim=1), dim=1))
             sender_loss.backward()
             sender_opt.step()
 
@@ -185,7 +186,7 @@ if __name__ == '__main__':
             print('\nIteration: {}'.format(batch))
             print(contexts)
             # print(choice_objs)
-            print(torch.cat([dim_msg, min_msg], dim=1))
+            print(msgs_in)
             print(receiver_mse)
             print(reward)
             print('% correct: {}'.format(torch.mean(reward)))
