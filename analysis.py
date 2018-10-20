@@ -17,18 +17,19 @@ from plotnine import *
 
 def visualize_trial(data):
 
+    data = data.astype('category')  # just in case
     msg_vars = [col for col in data if col.startswith('msg')]
     long_data = pd.melt(
         data,
-        id_vars=['true_dim', 'true_mins', 'total_true', 'total_msg'],
+        id_vars=['true_dim', 'true_mins', 'true_total', 'total_msg'],
         value_vars=msg_vars,
         var_name='msg',
         value_name='sent')
 
-    (ggplot(data=long_data) +
+    print(ggplot(data=long_data) +
      geom_bar(aes('true_dim', fill='sent'), position='dodge') +
      facet_wrap('msg'))
 
-    (ggplot(data=long_data) +
+    print(ggplot(data=long_data) +
      geom_bar(aes('true_mins', fill='sent'), position='dodge') +
      facet_wrap('msg'))
