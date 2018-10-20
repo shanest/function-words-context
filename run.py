@@ -227,6 +227,7 @@ def run_trial(num, out_dir, sender=None, receiver=None,
                        (test_data['msg_'+str(idx-1)].max() + 1) *
                        test_data['msg_'+str(idx)])
         test_data['total_msg'] = msg_col
+        test_data = test_data.astype('category')
         test_data.to_csv(out_root + 'test.csv')
 
 
