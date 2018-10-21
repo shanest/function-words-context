@@ -28,10 +28,30 @@ class Sender(nn.Module):
         self.min_msg = nn.Linear(32, 2)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = F.elu(self.fc1(x))
+        x = F.elu(self.fc2(x))
         dim_logits = self.dim_msg(x)
         min_logits = self.min_msg(x)
+        return F.softmax(dim_logits, dim=1), F.softmax(min_logits, dim=1)
+
+
+class SplitSender(nn.Module):
+    def __init__(self, context_size, n_dims):
+        super(SplitSender, self).__init__()
+        self.dim1 = nn.Linear(context_size * n_dims, 32)
+        self.dim2 = nn.Linear(32, 32)
+        self.min1 = nn.Linear(context_size * n_dims, 32)
+        self.min2 = nn.Linear(32, 32)
+        self.dim_msg = nn.Linear(32, n_dims)
+        self.min_msg = nn.Linear(32, 2)
+
+    def forward(self, x):
+        dimx = F.relu(self.dim1(x))
+        dimx = F.relu(self.dim2(dimx))
+        dim_logits = self.dim_msg(dimx)
+        minx = F.relu(self.min1(x))
+        minx = F.relu(self.min2(minx))
+        min_logits = self.min_msg(minx)
         return F.softmax(dim_logits, dim=1), F.softmax(min_logits, dim=1)
 
 

@@ -104,6 +104,7 @@ def run_trial(num, out_dir, sender=None, receiver=None,
     context_size = 2*n_dims  # TODO: modify get_context, allow to vary
     data = pd.DataFrame(columns=['batch_num', 'percent_correct'])
 
+    # TODO: specify sender/receiver type as args
     if not fixed_sender:
         sender = models.Sender(context_size, n_dims)
         sender_opt = torch.optim.Adam(sender.parameters())
@@ -218,6 +219,7 @@ def run_trial(num, out_dir, sender=None, receiver=None,
                                   'correct': reward.numpy().astype(int)})
         test_data['true_total'] = (test_data['true_dim'] +
                                    n_dims*test_data['true_mins'])
+        print('Test reward: {}'.format(test_data['correct'].mean()))
         for idx in range(len(msgs)):
             test_data['msg_' + str(idx)] = np.argmax(msgs[idx].numpy(), axis=1)
         # TODO: document!
@@ -240,6 +242,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_batches', type=int, default=50000)
     parser.add_argument('--record_every', type=int, default=50)
     parser.add_argument('--num_test', type=int, default=5000)
+    parser.add_argument('--n_dims', type=int, default=2)
     args = parser.parse_args()
 
     for trial in range(args.num_trials):
