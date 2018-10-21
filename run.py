@@ -136,16 +136,16 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             # code can be maximally modular?  Would require returning
             # ``probabilities'' and wasting compute time ``training'' it
             msgs = get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)
-            msgs_in = torch.cat([torch.Tensor(msg) for msg in msgs], dim=1)
+            # msgs_in = torch.cat([torch.Tensor(msg) for msg in msgs], dim=1)
         else:
             msg_probs = sender(torch.Tensor(contexts))
             msg_dists = [torch.distributions.OneHotCategorical(probs)
                          for probs in msg_probs]
             msgs = [dist.sample() for dist in msg_dists]
-            msgs_in = torch.cat(msgs, dim=1)
+            # msgs_in = torch.cat(msgs, dim=1)
 
         # 3. get choice from receiver
-        choice_probs = receiver(torch.Tensor(rec_contexts), msgs_in)
+        choice_probs = receiver(torch.Tensor(rec_contexts), msgs)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
 

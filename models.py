@@ -66,7 +66,7 @@ class BaseReceiver(nn.Module):
         self.n_dims = n_dims
 
     def forward(self, contexts, msgs):
-        x = F.relu(self.fc1(torch.cat([contexts, msgs], dim=1)))
+        x = F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1)))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         target = self.target(x)
@@ -84,7 +84,7 @@ class MSEReceiver(nn.Module):
         self.n_dims = n_dims
 
     def forward(self, contexts, msgs):
-        x = F.relu(self.fc1(torch.cat([contexts, msgs], dim=1)))
+        x = F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1)))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         obj = self.obj_layer(x)
