@@ -32,7 +32,8 @@ class Sender(nn.Module):
         x = F.elu(self.fc2(x))
         dim_logits = self.dim_msg(x)
         min_logits = self.min_msg(x)
-        return F.softmax(dim_logits, dim=1), F.softmax(min_logits, dim=1)
+        return (F.softmax(dim_logits / 0.5, dim=1),
+                F.softmax(min_logits / 0.5, dim=1))
 
 
 class SplitSender(nn.Module):
@@ -56,7 +57,7 @@ class SplitSender(nn.Module):
 
 
 class BaseReceiver(nn.Module):
-    def __init__(self, context_size, n_dims):
+    def __init__(self, context_size, n_dims, max_msg):
         super(BaseReceiver, self).__init__()
         self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2, 64)
         self.fc2 = nn.Linear(64, 32)
@@ -68,11 +69,11 @@ class BaseReceiver(nn.Module):
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         target = self.target(x)
-        return F.softmax(target / 1, dim=1)
+        return F.softmax(target / 0.5, dim=1)
 
 
 class MSEReceiver(nn.Module):
-    def __init__(self, context_size, n_dims):
+    def __init__(self, context_size, n_dims, max_msg):
         super(MSEReceiver, self).__init__()
         self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2, 64)
         self.fc2 = nn.Linear(64, 32)
@@ -92,6 +93,28 @@ class MSEReceiver(nn.Module):
         comp_per_obj = 1 / torch.sqrt(comp_per_obj)
         target = comp_per_obj.reshape((-1, self.context_size))
         return F.softmax(target / 1, dim=1)
+
+
+class RecursiveReceiver(nn.Module):
+    def __init__(self, context_size, n_dims, max_msg):
+        super(RecursiveReceiver, self).__init__()
+        self.rec_layer = nn.Linear(context_size * n_dims + max_msg + 64, 64)
+        self.target = nn.Linear(64, context_size)
+        self.max_msg = max_msg
+
+    def forward(self, contexts, msgs):
+        x = torch.zeros((contexts.shape[0], 64))
+        for msg in msgs:
+            num_msg = msg.shape[1]
+            if num_msg < self.max_msg:
+                msg = torch.cat([msg,
+                                 torch.zeros(
+                                     (msg.shape[0], self.max_msg - num_msg))
+                                 ], dim=1)
+                x = torch.cat([contexts, msg, x], dim=1)
+                x = self.rec_layer(x)
+        target = self.target(x)
+        return F.softmax(target / 0.1, dim=1)
 
 
 # TODO: implement RNN sender and receiver!

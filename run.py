@@ -104,23 +104,18 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
     context_size = 2*n_dims  # TODO: modify get_context, allow to vary
     data = pd.DataFrame(columns=['batch_num', 'percent_correct'])
 
-    # TODO: specify sender/receiver type as args
     if not fixed_sender:
         sender = sender_fn(context_size, n_dims)
         sender_opt = torch.optim.Adam(sender.parameters())
 
-    receiver = receiver_fn(context_size, n_dims)
+    # TODO: generalize max_msg argument to receivers
+    receiver = receiver_fn(context_size, n_dims, n_dims)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
     def one_batch(batch_size):
         # 1. get contexts and target object from Nature
         contexts = np.stack([get_context(n_dims, objs)
                             for _ in range(batch_size)])
-        target_obj = torch.Tensor(
-            contexts[np.arange(batch_size)[:, None],
-                     np.repeat(np.arange(n_dims)[None, :],
-                               batch_size, axis=0)]
-        )
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
@@ -247,7 +242,8 @@ if __name__ == '__main__':
 
     args.receiver_fn = {
         'base': models.BaseReceiver,
-        'mse': models.MSEReceiver
+        'mse': models.MSEReceiver,
+        'recursive': models.RecursiveReceiver
     }[args.receiver_type]
 
     for trial in range(args.num_trials):
