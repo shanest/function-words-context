@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# TODO: parameterize hidden layers
+# TODO: parameterize hidden layers, softmax temps
 # TODO: document
 class Sender(nn.Module):
     def __init__(self, context_size, n_dims):
@@ -52,12 +52,30 @@ class SplitSender(nn.Module):
         minx = F.relu(self.min1(x))
         minx = F.relu(self.min2(minx))
         min_logits = self.min_msg(minx)
-        return F.softmax(dim_logits / 0.1, dim=1), F.softmax(min_logits / 0.1, dim=1)
+        return F.softmax(dim_logits / 1, dim=1), F.softmax(min_logits / 1, dim=1)
 
 
-class Receiver(nn.Module):
+class BaseReceiver(nn.Module):
     def __init__(self, context_size, n_dims):
-        super(Receiver, self).__init__()
+        super(BaseReceiver, self).__init__()
+        self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 32)
+        self.target = nn.Linear(32, context_size)
+        self.context_size = context_size
+        self.n_dims = n_dims
+
+    def forward(self, contexts, msgs):
+        x = F.relu(self.fc1(torch.cat([contexts, msgs], dim=1)))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        target = self.target(x)
+        return F.softmax(target / 1, dim=1)
+
+
+class MSEReceiver(nn.Module):
+    def __init__(self, context_size, n_dims):
+        super(MSEReceiver, self).__init__()
         self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2, 64)
         self.fc2 = nn.Linear(64, 32)
         self.fc3 = nn.Linear(32, 32)
@@ -70,11 +88,12 @@ class Receiver(nn.Module):
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         obj = self.obj_layer(x)
+        # TODO: parameterize this receiver based on similarity measure here?
         init_comp = (obj.repeat((1, self.context_size)) - contexts)**2
         comp_per_obj = init_comp.view((-1, self.n_dims)).sum(dim=1)
         comp_per_obj = 1 / torch.sqrt(comp_per_obj)
-        comp_by_context = comp_per_obj.reshape((-1, self.context_size))
-        return obj, F.softmax(comp_by_context / 0.1, dim=1)
+        target = comp_per_obj.reshape((-1, self.context_size))
+        return F.softmax(target / 1, dim=1)
 
 
 # TODO: implement RNN sender and receiver!

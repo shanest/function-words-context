@@ -145,8 +145,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             msgs_in = torch.cat(msgs, dim=1)
 
         # 3. get choice from receiver
-        choice_objs, choice_probs = receiver(torch.Tensor(rec_contexts),
-                                             msgs_in)
+        choice_probs = receiver(torch.Tensor(rec_contexts), msgs_in)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
 
@@ -155,12 +154,11 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
                 torch.from_numpy(rec_target.flatten()),
                 choice).float().detach()
 
-        return (contexts, msg_dists, msgs, choice_dist, choice, reward,
-                choice_objs, target_obj)
+        return contexts, msg_dists, msgs, choice_dist, choice, reward
 
     for batch in range(num_batches):
-        (contexts, msg_dists, msgs, choice_dist, choice, reward, choice_objs,
-         target_obj) = one_batch(batch_size)
+        contexts, msg_dists, msgs, choice_dist, choice, reward = \
+                one_batch(batch_size)
         advantages = reward
         # reward 1/0 goes to -1/1
         # advantages = 2*reward - 1
@@ -182,7 +180,6 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         receiver_opt.zero_grad()
         choice_log_prob = choice_dist.log_prob(choice)
         receiver_reinforce = -torch.sum(advantages * choice_log_prob)
-        receiver_mse = F.mse_loss(choice_objs, target_obj)
         receiver_loss = receiver_reinforce
         receiver_loss.backward()
         receiver_opt.step()
@@ -190,9 +187,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         if batch % record_every == 0:
             print('\nIteration: {}'.format(batch))
             print(contexts)
-            # print(choice_objs)
             print(torch.cat(msgs, dim=1))
-            print(receiver_mse)
             print(reward)
             percent = torch.mean(reward).data.item()
             print('% correct: {}'.format(percent))
@@ -253,7 +248,8 @@ if __name__ == '__main__':
     }[args.sender_type]
 
     args.receiver_fn = {
-        'base': models.Receiver,
+        'base': models.BaseReceiver,
+        'mse': models.MSEReceiver
     }[args.receiver_type]
 
     for trial in range(args.num_trials):
