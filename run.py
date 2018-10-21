@@ -136,13 +136,11 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             # code can be maximally modular?  Would require returning
             # ``probabilities'' and wasting compute time ``training'' it
             msgs = get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)
-            # msgs_in = torch.cat([torch.Tensor(msg) for msg in msgs], dim=1)
         else:
             msg_probs = sender(torch.Tensor(contexts))
             msg_dists = [torch.distributions.OneHotCategorical(probs)
                          for probs in msg_probs]
             msgs = [dist.sample() for dist in msg_dists]
-            # msgs_in = torch.cat(msgs, dim=1)
 
         # 3. get choice from receiver
         choice_probs = receiver(torch.Tensor(rec_contexts), msgs)
@@ -206,7 +204,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         torch.save(receiver.state_dict(), out_root + 'receiver.pt')
 
     if num_test:
-        contexts, _, msgs, _, choice, reward, _, _ = one_batch(num_test)
+        contexts, _, msgs, _, choice, reward = one_batch(num_test)
         true_dims, true_mins = get_dim_and_dir(contexts, n_dims, context_size)
         # TODO: record more? whole context, other features of it?
         test_data = pd.DataFrame({'true_dim': true_dims,

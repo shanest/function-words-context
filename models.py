@@ -62,8 +62,6 @@ class BaseReceiver(nn.Module):
         self.fc2 = nn.Linear(64, 32)
         self.fc3 = nn.Linear(32, 32)
         self.target = nn.Linear(32, context_size)
-        self.context_size = context_size
-        self.n_dims = n_dims
 
     def forward(self, contexts, msgs):
         x = F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1)))
