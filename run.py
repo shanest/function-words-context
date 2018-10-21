@@ -96,8 +96,8 @@ def get_communicative_success(contexts, objs, n_dims):
     return (predicted_obj == 0).astype(int)
 
 
-def run_trial(num, out_dir, sender=None, receiver=None,
-              n_dims=2, objs=np.arange(-1, 1, 1/5), fixed_sender=False,
+def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
+              n_dims=2, objs=np.arange(-1, 1, 1/10), fixed_sender=False,
               batch_size=32, num_batches=15000, record_every=50,
               save_models=True, num_test=5000, **kwargs):
 
@@ -106,10 +106,10 @@ def run_trial(num, out_dir, sender=None, receiver=None,
 
     # TODO: specify sender/receiver type as args
     if not fixed_sender:
-        sender = models.Sender(context_size, n_dims)
+        sender = sender_fn(context_size, n_dims)
         sender_opt = torch.optim.Adam(sender.parameters())
 
-    receiver = models.Receiver(context_size, n_dims)
+    receiver = receiver_fn(context_size, n_dims)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
     def one_batch(batch_size):
@@ -243,7 +243,18 @@ if __name__ == '__main__':
     parser.add_argument('--record_every', type=int, default=50)
     parser.add_argument('--num_test', type=int, default=5000)
     parser.add_argument('--n_dims', type=int, default=2)
+    parser.add_argument('--sender_type', type=str, default='base')
+    parser.add_argument('--receiver_type', type=str, default='base')
     args = parser.parse_args()
+
+    args.sender_fn = {
+        'base': models.Sender,
+        'split': models.SplitSender
+    }[args.sender_type]
+
+    args.receiver_fn = {
+        'base': models.Receiver,
+    }[args.receiver_type]
 
     for trial in range(args.num_trials):
         run_trial(trial, args.out_path, **vars(args))
