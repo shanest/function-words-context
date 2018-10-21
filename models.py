@@ -52,7 +52,7 @@ class SplitSender(nn.Module):
         minx = F.relu(self.min1(x))
         minx = F.relu(self.min2(minx))
         min_logits = self.min_msg(minx)
-        return F.softmax(dim_logits, dim=1), F.softmax(min_logits, dim=1)
+        return F.softmax(dim_logits / 0.1, dim=1), F.softmax(min_logits / 0.1, dim=1)
 
 
 class Receiver(nn.Module):
@@ -74,7 +74,7 @@ class Receiver(nn.Module):
         comp_per_obj = init_comp.view((-1, self.n_dims)).sum(dim=1)
         comp_per_obj = 1 / torch.sqrt(comp_per_obj)
         comp_by_context = comp_per_obj.reshape((-1, self.context_size))
-        return obj, F.softmax(comp_by_context / 0.2, dim=1)
+        return obj, F.softmax(comp_by_context / 0.1, dim=1)
 
 
 # TODO: implement RNN sender and receiver!
