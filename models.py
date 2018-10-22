@@ -74,6 +74,29 @@ class BaseReceiver(nn.Module):
         return F.softmax(target / 1, dim=1)
 
 
+class DimReceiver(nn.Module):
+    # TODO: unify interface with this agent and others
+    def __init__(self, context_size, n_dims, max_msg, with_dim_labels):
+        super(DimReceiver, self).__init__()
+        self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2 +
+                             int(with_dim_labels)*context_size*n_dims**2, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 32)
+        self.target = nn.Linear(32, context_size)
+        self.dim = nn.Linear(n_dims+2, 16)
+        self.dim2 = nn.Linear(16, n_dims)
+
+    def forward(self, contexts, msgs):
+        x = F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1)))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        target = self.target(x)
+        dim = F.relu(self.dim(torch.cat(msgs, dim=1)))
+        dim = self.dim2(dim)
+        return (F.softmax(target / 0.5, dim=1),
+                F.softmax(dim / 0.5, dim=1))
+
+
 class MSEReceiver(nn.Module):
     def __init__(self, context_size, n_dims, max_msg, with_dim_labels):
         super(MSEReceiver, self).__init__()

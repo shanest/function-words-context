@@ -121,6 +121,8 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
     receiver = receiver_fn(context_size, n_dims, n_dims, with_dim_labels)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
+    reward_weight = 0.75
+
     def one_batch(batch_size):
         # 1. get contexts and target object from Nature
         contexts = np.stack([get_context(n_dims, objs, with_dim_labels)
@@ -140,7 +142,9 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             # TODO: implement FixedSender as a nn.Module in models, so that the
             # code can be maximally modular?  Would require returning
             # ``probabilities'' and wasting compute time ``training'' it
-            msgs = get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)
+            msgs = [torch.Tensor(val) for val in
+                    get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)]
+            msg_dists = None
         else:
             msg_probs = sender(torch.Tensor(contexts))
             msg_dists = [torch.distributions.OneHotCategorical(probs)
@@ -151,11 +155,11 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         choice_probs = receiver(torch.Tensor(rec_contexts), msgs)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
+        true_dims, _ = get_dim_and_dir(contexts, n_dims, context_size)
 
         # 4. get reward
-        reward = torch.eq(
-                torch.from_numpy(rec_target.flatten()),
-                choice).float().detach()
+        reward = torch.eq(torch.from_numpy(rec_target.flatten()),
+                          choice).float().detach()
 
         return contexts, msg_dists, msgs, choice_dist, choice, reward
 
@@ -205,8 +209,9 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
     data.to_csv(out_root + 'train.csv')
 
     if save_models:
-        torch.save(sender.state_dict(), out_root + 'sender.pt')
         torch.save(receiver.state_dict(), out_root + 'receiver.pt')
+        if sender_fn is not None:
+            torch.save(sender.state_dict(), out_root + 'sender.pt')
 
     if num_test:
         contexts, _, msgs, _, choice, reward = one_batch(num_test)
@@ -253,6 +258,7 @@ if __name__ == '__main__':
 
     args.receiver_fn = {
         'base': models.BaseReceiver,
+        'dim': models.DimReceiver,
         'mse': models.MSEReceiver,
         'recursive': models.RecursiveReceiver
     }[args.receiver_type]
