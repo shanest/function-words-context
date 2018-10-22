@@ -33,8 +33,13 @@ class Sender(nn.Module):
         x = F.elu(self.fc2(x))
         dim_logits = self.dim_msg(x)
         min_logits = self.min_msg(x)
-        return (F.softmax(dim_logits / 0.5, dim=1),
-                F.softmax(min_logits / 0.5, dim=1))
+        # TODO: refactor these 4 lines into a util method?
+        msg_probs = (F.softmax(dim_logits / 0.5, dim=1),
+                     F.softmax(min_logits / 0.5, dim=1))
+        msg_dists = [torch.distributions.OneHotCategorical(probs)
+                     for probs in msg_probs]
+        msgs = [dist.sample() for dist in msg_dists]
+        return msg_dists, msgs
 
 
 class SplitSender(nn.Module):
@@ -54,7 +59,39 @@ class SplitSender(nn.Module):
         minx = F.relu(self.min1(x))
         minx = F.relu(self.min2(minx))
         min_logits = self.min_msg(minx)
-        return F.softmax(dim_logits / 1, dim=1), F.softmax(min_logits / 1, dim=1)
+        msg_probs = (F.softmax(dim_logits / 0.5, dim=1),
+                     F.softmax(min_logits / 0.5, dim=1))
+        msg_dists = [torch.distributions.OneHotCategorical(probs)
+                     for probs in msg_probs]
+        msgs = [dist.sample() for dist in msg_dists]
+        return msg_dists, msgs
+
+
+class RNNSender(nn.Module):
+
+    def __init__(self, context_size, n_dims, with_dim_labels,
+                 max_len=2, num_msgs=2, hidden_size=64):
+        super(RNNSender, self).__init__()
+        self.hidden_size = hidden_size
+        self.lstm = nn.LSTMCell(context_size * n_dims + num_msgs + hidden_size,
+                                hidden_size)
+        self.msg = nn.Linear(hidden_size, num_msgs)
+        self.max_len = max_len
+        self.num_msgs = num_msgs
+
+    def forward(self, contexts):
+        batch_size = contexts.shape[0]
+        hidden = torch.zeros((batch_size, self.hidden_size))
+        cur_msg = torch.zeros((batch_size, self.num_msgs))
+        msg_dists, msgs = [], []
+        for _ in range(self.max_len):
+            combined = torch.cat([contexts, cur_msg, hidden], dim=1)
+            hidden, output = self.lstm(combined)
+            msg_probs = F.softmax(self.msg(output) / 0.25, dim=1)
+            msg_dists.append(torch.distributions.OneHotCategorical(msg_probs))
+            cur_msg = msg_dists[-1].sample()
+            msgs.append(cur_msg)
+        return msg_dists, msgs
 
 
 class BaseReceiver(nn.Module):
@@ -124,35 +161,6 @@ class MSEReceiver(nn.Module):
         return F.softmax(target / 1, dim=1)
 
 
-# TODO: implement RNN sender and receiver!
-
-class RNNSender(nn.Module):
-
-    def __init__(self, context_size, n_dims, with_dim_labels,
-                 max_len=2, num_msgs=2, hidden_size=64):
-        super(RNNSender, self).__init__()
-        self.hidden_size = hidden_size
-        self.lstm = nn.LSTMCell(context_size * n_dims + num_msgs + hidden_size,
-                                hidden_size)
-        self.msg = nn.Linear(hidden_size, num_msgs)
-        self.max_len = max_len
-        self.num_msgs = num_msgs
-
-    def forward(self, contexts):
-        batch_size = contexts.shape[0]
-        hidden = torch.zeros((batch_size, self.hidden_size))
-        cur_msg = torch.zeros((batch_size, self.num_msgs))
-        msg_dists, msgs = [], []
-        for _ in range(self.max_len):
-            combined = torch.cat([contexts, cur_msg, hidden], dim=1)
-            hidden, output = self.lstm(combined)
-            msg_probs = F.softmax(self.msg(output) / 1, dim=1)
-            msg_dists.append(torch.distributions.OneHotCategorical(msg_probs))
-            cur_msg = msg_dists[-1].sample()
-            msgs.append(cur_msg)
-        return msg_dists, msgs
-
-
 class RNNReceiver(nn.Module):
 
     def __init__(self, context_size, n_dims, max_msg, with_dim_labels,
@@ -175,4 +183,4 @@ class RNNReceiver(nn.Module):
             combined = torch.cat([contexts, msg, hidden], dim=1)
             hidden, output = self.lstm(combined)
         target = self.target(output)
-        return F.softmax(target / 0.5, dim=1)
+        return F.softmax(target / 0.25, dim=1)

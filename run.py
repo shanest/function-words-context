@@ -144,13 +144,6 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
                     get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)]
             msg_dists = None
         else:
-            """
-            msg_probs = sender(torch.Tensor(contexts))
-            msg_dists = [torch.distributions.OneHotCategorical(probs)
-                         for probs in msg_probs]
-            msgs = [dist.sample() for dist in msg_dists]
-            """
-            # TODO: refactor all other Senders to this interface 
             msg_dists, msgs = sender(torch.Tensor(contexts))
 
         # 3. get choice from receiver
