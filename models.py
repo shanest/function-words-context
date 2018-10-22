@@ -126,37 +126,53 @@ class MSEReceiver(nn.Module):
 
 # TODO: implement RNN sender and receiver!
 
+class RNNSender(nn.Module):
+
+    def __init__(self, context_size, n_dims, with_dim_labels,
+                 max_len=2, num_msgs=2, hidden_size=64):
+        super(RNNSender, self).__init__()
+        self.hidden_size = hidden_size
+        self.lstm = nn.LSTMCell(context_size * n_dims + num_msgs + hidden_size,
+                                hidden_size)
+        self.msg = nn.Linear(hidden_size, num_msgs)
+        self.max_len = max_len
+        self.num_msgs = num_msgs
+
+    def forward(self, contexts):
+        batch_size = contexts.shape[0]
+        hidden = torch.zeros((batch_size, self.hidden_size))
+        cur_msg = torch.zeros((batch_size, self.num_msgs))
+        msg_dists, msgs = [], []
+        for _ in range(self.max_len):
+            combined = torch.cat([contexts, cur_msg, hidden], dim=1)
+            hidden, output = self.lstm(combined)
+            msg_probs = F.softmax(self.msg(output) / 1, dim=1)
+            msg_dists.append(torch.distributions.OneHotCategorical(msg_probs))
+            cur_msg = msg_dists[-1].sample()
+            msgs.append(cur_msg)
+        return msg_dists, msgs
+
+
 class RNNReceiver(nn.Module):
 
     def __init__(self, context_size, n_dims, max_msg, with_dim_labels,
-                 hidden_size=64, out_size=64):
+                 hidden_size=64):
         super(RNNReceiver, self).__init__()
         self.hidden_size = hidden_size
         self.max_msg = max_msg
-        """
-        self.i2h = nn.Linear(context_size*n_dims + max_msg + hidden_size,
-                             hidden_size)
-        self.i2o = nn.Linear(context_size*n_dims + max_msg + out_size,
-                             out_size)
-        """
         self.lstm = nn.LSTMCell(context_size * n_dims + max_msg + hidden_size,
                                 hidden_size)
-        self.target = nn.Linear(out_size, context_size)
+        self.target = nn.Linear(hidden_size, context_size)
 
     def forward(self, contexts, msgs):
         hidden = torch.zeros(contexts.shape[0], self.hidden_size)
-        output = torch.zeros(contexts.shape[0], self.hidden_size)
         for msg in msgs:
             num_msg = msg.shape[1]
-            if num_msg < self.max_msg:
+            if num_msg < self.max_msg:  # can have diff msg len per pos
                 msg = torch.cat(
                     [msg, torch.zeros((msg.shape[0], self.max_msg - num_msg))],
                     dim=1)
             combined = torch.cat([contexts, msg, hidden], dim=1)
             hidden, output = self.lstm(combined)
-            """
-            output = self.i2o(combined)
-            hidden = self.i2h(combined)
-            """
         target = self.target(output)
         return F.softmax(target / 0.5, dim=1)
