@@ -33,8 +33,8 @@ class Sender(nn.Module):
         x = F.elu(self.fc2(x))
         dim_logits = self.dim_msg(x)
         min_logits = self.min_msg(x)
-        return (F.softmax(dim_logits / 1, dim=1),
-                F.softmax(min_logits / 1, dim=1))
+        return (F.softmax(dim_logits / 0.5, dim=1),
+                F.softmax(min_logits / 0.5, dim=1))
 
 
 class SplitSender(nn.Module):
@@ -71,7 +71,7 @@ class BaseReceiver(nn.Module):
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         target = self.target(x)
-        return F.softmax(target / 1, dim=1)
+        return F.softmax(target / 0.1, dim=1)
 
 
 class DimReceiver(nn.Module):
@@ -124,26 +124,39 @@ class MSEReceiver(nn.Module):
         return F.softmax(target / 1, dim=1)
 
 
-class RecursiveReceiver(nn.Module):
-    def __init__(self, context_size, n_dims, max_msg):
-        super(RecursiveReceiver, self).__init__()
-        self.rec_layer = nn.Linear(context_size * n_dims + max_msg + 64, 64)
-        self.target = nn.Linear(64, context_size)
+# TODO: implement RNN sender and receiver!
+
+class RNNReceiver(nn.Module):
+
+    def __init__(self, context_size, n_dims, max_msg, with_dim_labels,
+                 hidden_size=64, out_size=64):
+        super(RNNReceiver, self).__init__()
+        self.hidden_size = hidden_size
         self.max_msg = max_msg
+        """
+        self.i2h = nn.Linear(context_size*n_dims + max_msg + hidden_size,
+                             hidden_size)
+        self.i2o = nn.Linear(context_size*n_dims + max_msg + out_size,
+                             out_size)
+        """
+        self.lstm = nn.LSTMCell(context_size * n_dims + max_msg + hidden_size,
+                                hidden_size)
+        self.target = nn.Linear(out_size, context_size)
 
     def forward(self, contexts, msgs):
-        x = torch.zeros((contexts.shape[0], 64))
+        hidden = torch.zeros(contexts.shape[0], self.hidden_size)
+        output = torch.zeros(contexts.shape[0], self.hidden_size)
         for msg in msgs:
             num_msg = msg.shape[1]
             if num_msg < self.max_msg:
-                msg = torch.cat([msg,
-                                 torch.zeros(
-                                     (msg.shape[0], self.max_msg - num_msg))
-                                 ], dim=1)
-                x = torch.cat([contexts, msg, x], dim=1)
-                x = F.elu(self.rec_layer(x))
-        target = self.target(x)
+                msg = torch.cat(
+                    [msg, torch.zeros((msg.shape[0], self.max_msg - num_msg))],
+                    dim=1)
+            combined = torch.cat([contexts, msg, hidden], dim=1)
+            hidden, output = self.lstm(combined)
+            """
+            output = self.i2o(combined)
+            hidden = self.i2h(combined)
+            """
+        target = self.target(output)
         return F.softmax(target / 0.5, dim=1)
-
-
-# TODO: implement RNN sender and receiver!

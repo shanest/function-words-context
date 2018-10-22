@@ -106,7 +106,7 @@ def get_communicative_success(contexts, objs, n_dims):
 
 
 def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
-              n_dims=2, objs=np.arange(-1, 1, 1/10), with_dim_labels=False,
+              n_dims=2, objs=np.arange(-1, 1, 1/100), with_dim_labels=False,
               batch_size=32, num_batches=15000, record_every=50,
               save_models=True, num_test=5000, **kwargs):
 
@@ -120,8 +120,6 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
     # TODO: generalize max_msg argument to receivers
     receiver = receiver_fn(context_size, n_dims, n_dims, with_dim_labels)
     receiver_opt = torch.optim.Adam(receiver.parameters())
-
-    reward_weight = 0.75
 
     def one_batch(batch_size):
         # 1. get contexts and target object from Nature
@@ -246,7 +244,7 @@ if __name__ == '__main__':
     parser.add_argument('--record_every', type=int, default=50)
     parser.add_argument('--num_test', type=int, default=5000)
     parser.add_argument('--n_dims', type=int, default=2)
-    parser.add_argument('--sender_type', type=str, default='base')
+    parser.add_argument('--sender_type', type=str, default=None)
     parser.add_argument('--receiver_type', type=str, default='base')
     parser.add_argument('--with_dim_labels', action='store_true')
     args = parser.parse_args()
@@ -260,7 +258,7 @@ if __name__ == '__main__':
         'base': models.BaseReceiver,
         'dim': models.DimReceiver,
         'mse': models.MSEReceiver,
-        'recursive': models.RecursiveReceiver
+        'rnn': models.RNNReceiver
     }[args.receiver_type]
 
     for trial in range(args.num_trials):
