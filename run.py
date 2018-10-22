@@ -20,7 +20,7 @@ import pandas as pd
 import models
 
 
-def get_context(n_dims, scale):
+def get_context(n_dims, scale, with_dim_label=False):
     """Gets one 'context'.  A context is a 1-D array representation of
     2*`n_dims` objects.  Each object has `n_dims` properties, where the
     value for each property comes from `scale`.  In a context, each object is
@@ -41,6 +41,13 @@ def get_context(n_dims, scale):
         objs.append(dimension)
     objs = np.array(objs)
     objs = np.transpose(objs)
+
+    if with_dim_label:
+        dims = np.concatenate([np.eye(n_dims)]*2*n_dims)
+        objs = np.reshape(objs, (-1, 1))
+        objs = np.concatenate([dims, objs], axis=1)
+        objs = objs.reshape((2*n_dims, -1))
+
     np.random.shuffle(objs)
     return objs.flatten()
 
@@ -50,11 +57,13 @@ def get_permutations(batch_size, context_size):
                      for _ in range(batch_size)])
 
 
-def apply_perms(contexts, perms, n_dims, batch_size):
+def apply_perms(contexts, perms, n_dims, batch_size, with_dim_labels):
     # TODO: DOCUMENT
-    obj_indices = np.tile(np.stack([np.arange(n_dims)
-                                    for _ in range(batch_size)]), 2*n_dims)
-    perm_idx = np.repeat(perms, n_dims, axis=1)*n_dims + obj_indices
+    obj_indices = np.tile(np.stack(
+        [np.arange(n_dims + int(with_dim_labels)*n_dims**2)
+         for _ in range(batch_size)]), 2*n_dims)
+    perm_idx = (np.repeat(perms, n_dims + int(with_dim_labels)*n_dims**2, axis=1)
+                * (n_dims + int(with_dim_labels)*n_dims**2) + obj_indices)
     return contexts[np.arange(batch_size)[:, None], perm_idx]
 
 
@@ -97,36 +106,37 @@ def get_communicative_success(contexts, objs, n_dims):
 
 
 def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
-              n_dims=2, objs=np.arange(-1, 1, 1/10), fixed_sender=False,
+              n_dims=2, objs=np.arange(-1, 1, 1/10), with_dim_labels=False,
               batch_size=32, num_batches=15000, record_every=50,
               save_models=True, num_test=5000, **kwargs):
 
     context_size = 2*n_dims  # TODO: modify get_context, allow to vary
     data = pd.DataFrame(columns=['batch_num', 'percent_correct'])
 
-    if not fixed_sender:
-        sender = sender_fn(context_size, n_dims)
+    if sender_fn is not None:
+        sender = sender_fn(context_size, n_dims, with_dim_labels)
         sender_opt = torch.optim.Adam(sender.parameters())
 
     # TODO: generalize max_msg argument to receivers
-    receiver = receiver_fn(context_size, n_dims, n_dims)
+    receiver = receiver_fn(context_size, n_dims, n_dims, with_dim_labels)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
     def one_batch(batch_size):
         # 1. get contexts and target object from Nature
-        contexts = np.stack([get_context(n_dims, objs)
+        contexts = np.stack([get_context(n_dims, objs, with_dim_labels)
                             for _ in range(batch_size)])
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
         # permuted context
         rec_perms = get_permutations(batch_size, context_size)
-        rec_contexts = apply_perms(contexts, rec_perms, n_dims, batch_size)
+        rec_contexts = apply_perms(contexts, rec_perms, n_dims, batch_size,
+                                   with_dim_labels)
         # 1b. get correct target index based on perms
         rec_target = np.where(rec_perms == 0)[1][:, None]
 
         # 2. get signals form sender
-        if fixed_sender:
+        if sender_fn is None:
             # TODO: implement FixedSender as a nn.Module in models, so that the
             # code can be maximally modular?  Would require returning
             # ``probabilities'' and wasting compute time ``training'' it
@@ -159,7 +169,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
         # 5. compute losses and reinforce
         # 5a. sender
-        if not fixed_sender:
+        if sender_fn is not None:
             sender_opt.zero_grad()
             msg_log_probs = [msg_dists[idx].log_prob(msgs[idx])
                              for idx in range(len(msgs))]
@@ -233,6 +243,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_dims', type=int, default=2)
     parser.add_argument('--sender_type', type=str, default='base')
     parser.add_argument('--receiver_type', type=str, default='base')
+    parser.add_argument('--with_dim_labels', action='store_true')
     args = parser.parse_args()
 
     args.sender_fn = {
