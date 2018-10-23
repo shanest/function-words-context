@@ -22,25 +22,26 @@ import torch.nn.functional as F
 class Sender(nn.Module):
     def __init__(self, context_size, n_dims, with_dim_labels):
         super(Sender, self).__init__()
-        self.fc1 = nn.Linear(context_size * n_dims +
-                             int(with_dim_labels)*context_size*n_dims**2, 32)
+        self.fc1 = nn.Linear(context_size * n_dims**(1+int(with_dim_labels)), 32)
         self.fc2 = nn.Linear(32, 32)
         self.dim_msg = nn.Linear(32, n_dims)
         self.min_msg = nn.Linear(32, 2)
 
     def forward(self, x):
-        x = F.elu(self.fc1(x))
-        x = F.elu(self.fc2(x))
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
         dim_logits = self.dim_msg(x)
         min_logits = self.min_msg(x)
         # TODO: refactor these 4 lines into a util method?
-        msg_probs = (F.softmax(dim_logits / 0.5, dim=1),
-                     F.softmax(min_logits / 0.5, dim=1))
+        msg_probs = (F.softmax(dim_logits / 5, dim=1),
+                     F.softmax(min_logits / 5, dim=1))
         msg_dists = [torch.distributions.OneHotCategorical(probs)
                      for probs in msg_probs]
         msgs = [dist.sample() for dist in msg_dists]
         return msg_dists, msgs
 
+
+# TODO: make all agents compatible with with_dim_labels
 
 class SplitSender(nn.Module):
     def __init__(self, context_size, n_dims):
@@ -59,8 +60,8 @@ class SplitSender(nn.Module):
         minx = F.relu(self.min1(x))
         minx = F.relu(self.min2(minx))
         min_logits = self.min_msg(minx)
-        msg_probs = (F.softmax(dim_logits / 0.5, dim=1),
-                     F.softmax(min_logits / 0.5, dim=1))
+        msg_probs = (F.softmax(dim_logits / 1, dim=1),
+                     F.softmax(min_logits / 1, dim=1))
         msg_dists = [torch.distributions.OneHotCategorical(probs)
                      for probs in msg_probs]
         msgs = [dist.sample() for dist in msg_dists]
@@ -70,7 +71,7 @@ class SplitSender(nn.Module):
 class RNNSender(nn.Module):
 
     def __init__(self, context_size, n_dims, with_dim_labels,
-                 max_len=2, num_msgs=2, hidden_size=64):
+                 max_len=4, num_msgs=2, hidden_size=64):
         super(RNNSender, self).__init__()
         self.hidden_size = hidden_size
         self.lstm = nn.LSTMCell(context_size * n_dims + num_msgs + hidden_size,
@@ -97,8 +98,8 @@ class RNNSender(nn.Module):
 class BaseReceiver(nn.Module):
     def __init__(self, context_size, n_dims, max_msg, with_dim_labels):
         super(BaseReceiver, self).__init__()
-        self.fc1 = nn.Linear(context_size * n_dims + n_dims + 2 +
-                             int(with_dim_labels)*context_size*n_dims**2, 64)
+        self.fc1 = nn.Linear(context_size * n_dims**(1+int(with_dim_labels))
+                             + n_dims + 2,  64)
         self.fc2 = nn.Linear(64, 32)
         self.fc3 = nn.Linear(32, 32)
         self.target = nn.Linear(32, context_size)
@@ -108,7 +109,7 @@ class BaseReceiver(nn.Module):
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         target = self.target(x)
-        return F.softmax(target / 0.1, dim=1)
+        return F.softmax(target / 5, dim=1)
 
 
 class DimReceiver(nn.Module):
@@ -158,7 +159,7 @@ class MSEReceiver(nn.Module):
         ).sum(dim=1)
         comp_per_obj = 1 / torch.sqrt(comp_per_obj)
         target = comp_per_obj.reshape((-1, self.context_size))
-        return F.softmax(target / 1, dim=1)
+        return F.softmax(target / 2, dim=1)
 
 
 class RNNReceiver(nn.Module):

@@ -42,14 +42,28 @@ def get_context(n_dims, scale, with_dim_label=False):
     objs = np.array(objs)
     objs = np.transpose(objs)
 
-    if with_dim_label:
-        dims = np.concatenate([np.eye(n_dims)]*2*n_dims)
-        objs = np.reshape(objs, (-1, 1))
-        objs = np.concatenate([dims, objs], axis=1)
-        objs = objs.reshape((2*n_dims, -1))
+    send_objs, rec_objs = objs.copy(), objs.copy()
 
-    np.random.shuffle(objs)
-    return objs.flatten()
+    if with_dim_label:
+        def add_dim_labels(objs):
+            dims = np.concatenate([np.eye(n_dims)]*2*n_dims)
+            objs = np.reshape(objs, (-1, 1))
+            # objs = np.concatenate([dims, objs], axis=1)
+            objs = dims * objs
+            # permute order of dimensions for each obj
+            dim_perms = np.concatenate(
+                [np.random.permutation(n_dims) for _ in range(2*n_dims)])
+            row_idx = np.repeat(np.arange(2*n_dims), n_dims, axis=0)
+            row_shuffle = dim_perms + n_dims*row_idx
+            objs = objs[row_shuffle]
+            objs = objs.reshape((2*n_dims, -1))
+            return objs
+        send_objs = add_dim_labels(send_objs)
+        rec_objs = add_dim_labels(rec_objs)
+
+    # np.random.shuffle(send_objs)
+    # np.random.shuffle(rec_objs)
+    return send_objs.flatten(), rec_objs.flatten()
 
 
 def get_permutations(batch_size, context_size):
@@ -60,16 +74,18 @@ def get_permutations(batch_size, context_size):
 def apply_perms(contexts, perms, n_dims, batch_size, with_dim_labels):
     # TODO: DOCUMENT
     obj_indices = np.tile(np.stack(
-        [np.arange(n_dims + int(with_dim_labels)*n_dims**2)
+        [np.arange(n_dims**(1+int(with_dim_labels)))
          for _ in range(batch_size)]), 2*n_dims)
-    perm_idx = (np.repeat(perms, n_dims + int(with_dim_labels)*n_dims**2, axis=1)
-                * (n_dims + int(with_dim_labels)*n_dims**2) + obj_indices)
+    perm_idx = (np.repeat(perms, n_dims**(1+int(with_dim_labels)), axis=1)
+                * (n_dims**(1+int(with_dim_labels))) + obj_indices)
     return contexts[np.arange(batch_size)[:, None], perm_idx]
 
 
-def get_dim_and_dir(contexts, n_dims, context_size, one_hot=False):
+def get_dim_and_dir(contexts, n_dims, context_size,
+                    with_dim_label=False, one_hot=False):
     """Gets the dimension and whether it's max/min on that dimension for the
     first object in a batch of contexts. """
+    # TODO: get this to work with with_dim_label... need for eval!
     batch_size = np.shape(contexts)[0]
     dims, mins = np.zeros(batch_size), np.zeros(batch_size)
     for dim in range(n_dims):
@@ -123,14 +139,22 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
     def one_batch(batch_size):
         # 1. get contexts and target object from Nature
-        contexts = np.stack([get_context(n_dims, objs, with_dim_labels)
-                            for _ in range(batch_size)])
+        all_contexts =[get_context(n_dims, objs, with_dim_labels)
+                       for _ in range(batch_size)]
+        sender_contexts = np.stack([context[0] for context in all_contexts])
+        rec_contexts = np.stack([context[1] for context in all_contexts])
+        # shuffle objects, so that which min/max dim varies
+        sender_perms = get_permutations(batch_size, context_size)
+        sender_contexts = apply_perms(sender_contexts, sender_perms, n_dims,
+                                      batch_size, with_dim_labels)
+        rec_contexts = apply_perms(rec_contexts, sender_perms, n_dims,
+                                   batch_size, with_dim_labels)
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
         # permuted context
         rec_perms = get_permutations(batch_size, context_size)
-        rec_contexts = apply_perms(contexts, rec_perms, n_dims, batch_size,
+        rec_contexts = apply_perms(rec_contexts, rec_perms, n_dims, batch_size,
                                    with_dim_labels)
         # 1b. get correct target index based on perms
         rec_target = np.where(rec_perms == 0)[1][:, None]
@@ -141,22 +165,22 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             # code can be maximally modular?  Would require returning
             # ``probabilities'' and wasting compute time ``training'' it
             msgs = [torch.Tensor(val) for val in
-                    get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)]
+                    get_dim_and_dir(sender_contexts, n_dims, context_size, one_hot=True)]
             msg_dists = None
         else:
-            msg_dists, msgs = sender(torch.Tensor(contexts))
+            msg_dists, msgs = sender(torch.Tensor(sender_contexts))
 
         # 3. get choice from receiver
         choice_probs = receiver(torch.Tensor(rec_contexts), msgs)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
-        true_dims, _ = get_dim_and_dir(contexts, n_dims, context_size)
+        # true_dims, _ = get_dim_and_dir(contexts, n_dims, context_size)
 
         # 4. get reward
         reward = torch.eq(torch.from_numpy(rec_target.flatten()),
                           choice).float().detach()
 
-        return contexts, msg_dists, msgs, choice_dist, choice, reward
+        return sender_contexts, msg_dists, msgs, choice_dist, choice, reward
 
     for batch in range(num_batches):
         contexts, msg_dists, msgs, choice_dist, choice, reward = \
