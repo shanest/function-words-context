@@ -16,6 +16,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# TODO: update all receivers to same interface: return a list of dists and
+# choices
 
 # TODO: parameterize hidden layers, softmax temps
 # TODO: document
@@ -30,8 +32,8 @@ class Sender(nn.Module):
         self.min_bn = nn.BatchNorm1d(2)
 
     def forward(self, x):
-        x = F.elu(self.fc1(x))
-        x = F.elu(self.fc2(x))
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
         dim_logits = self.dim_msg(x)
         min_logits = self.min_msg(x)
         # TODO: refactor these 4 lines into a util method?
@@ -42,8 +44,6 @@ class Sender(nn.Module):
         msgs = [dist.sample() for dist in msg_dists]
         return msg_dists, msgs
 
-
-# TODO: make all agents compatible with with_dim_labels
 
 class SplitSender(nn.Module):
     def __init__(self, context_size, n_dims):
@@ -56,11 +56,11 @@ class SplitSender(nn.Module):
         self.min_msg = nn.Linear(32, 2)
 
     def forward(self, x):
-        dimx = F.elu(self.dim1(x))
-        dimx = F.elu(self.dim2(dimx))
+        dimx = F.relu(self.dim1(x))
+        dimx = F.relu(self.dim2(dimx))
         dim_logits = self.dim_msg(dimx)
-        minx = F.elu(self.min1(x))
-        minx = F.elu(self.min2(minx))
+        minx = F.relu(self.min1(x))
+        minx = F.relu(self.min2(minx))
         min_logits = self.min_msg(minx)
         msg_probs = (F.softmax(dim_logits / 1, dim=1),
                      F.softmax(min_logits / 1, dim=1))
@@ -98,19 +98,24 @@ class RNNSender(nn.Module):
 
 
 class BaseReceiver(nn.Module):
-    def __init__(self, context_size, max_msg, target_size):
+    def __init__(self, context_size, n_dims, target_size):
         super(BaseReceiver, self).__init__()
-        self.fc1 = nn.Linear(context_size + max_msg + 2,  64)
+        self.fc1 = nn.Linear(context_size + n_dims + 2,  64)
         self.fc2 = nn.Linear(64, 32)
         self.fc3 = nn.Linear(32, 32)
         self.target = nn.Linear(32, target_size)
+        self.target_bn = nn.BatchNorm1d(target_size)
 
     def forward(self, contexts, msgs):
         x = F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1)))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
-        target = self.target(x)
-        return F.softmax(target / 1, dim=1)
+        target_logits = self.target(x)
+        target_probs = F.softmax(
+            self.target_bn(target_logits), dim=1)
+        target_dist = torch.distributions.Categorical(target_probs)
+        target_choice = target_dist.sample()
+        return [target_dist], [target_choice]
 
 
 class DimReceiver(nn.Module):

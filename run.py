@@ -131,8 +131,6 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             print(np.array([con.view(at_dim_idx=at_dim_idx, dim_first=dim_first)
                    for con in contexts]))
             print(torch.cat(msgs, dim=1))
-            print(choices[0])
-            print(choices[1])
             print(reward)
             percent = torch.mean(reward).data.item()
             print('% correct: {}'.format(percent))
