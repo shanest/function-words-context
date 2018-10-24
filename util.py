@@ -25,4 +25,4 @@ def dirs_and_dims(contexts):
 
 def get_context_size(n_dims, scale, n_objs, at_dim_idx):
     dummy = context.Context(n_dims, scale, n_objs)
-    return len(dummy.view())
+    return len(dummy.view(at_dim_idx=at_dim_idx))

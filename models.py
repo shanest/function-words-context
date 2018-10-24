@@ -22,8 +22,8 @@ import torch.nn.functional as F
 class Sender(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Sender, self).__init__()
-        self.fc1 = nn.Linear(context_size, 32)
-        self.fc2 = nn.Linear(32, 32)
+        self.fc1 = nn.Linear(context_size, 64)
+        self.fc2 = nn.Linear(64, 32)
         self.dim_msg = nn.Linear(32, n_dims)
         self.min_msg = nn.Linear(32, 2)
 
@@ -71,7 +71,7 @@ class SplitSender(nn.Module):
 class RNNSender(nn.Module):
 
     def __init__(self, context_size, n_dims,
-                 max_len=4, num_msgs=2, hidden_size=64):
+                 max_len=2, num_msgs=2, hidden_size=64):
         super(RNNSender, self).__init__()
         self.hidden_size = hidden_size
         self.lstm = nn.LSTMCell(context_size + num_msgs + hidden_size,
@@ -88,7 +88,7 @@ class RNNSender(nn.Module):
         for _ in range(self.max_len):
             combined = torch.cat([contexts, cur_msg, hidden], dim=1)
             hidden, output = self.lstm(combined)
-            msg_probs = F.softmax(self.msg(output) / 0.25, dim=1)
+            msg_probs = F.softmax(self.msg(output) / 1, dim=1)
             msg_dists.append(torch.distributions.OneHotCategorical(msg_probs))
             cur_msg = msg_dists[-1].sample()
             msgs.append(cur_msg)
@@ -113,24 +113,35 @@ class BaseReceiver(nn.Module):
 
 class DimReceiver(nn.Module):
     # TODO: unify interface with this agent and others
-    def __init__(self, context_size, max_msg, target_size):
+    def __init__(self, context_size, n_dims, target_size):
         super(DimReceiver, self).__init__()
-        self.fc1 = nn.Linear(context_size + max_msg + 2, 64)
-        self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 32)
-        self.target = nn.Linear(32, context_size)
-        self.dim = nn.Linear(max_msg+2, 16)
-        self.dim2 = nn.Linear(16, max_msg)
+        self.dim1 = nn.Linear(context_size + n_dims, 64)
+        self.dim_choice = nn.Linear(64, n_dims)
+        self.dim_size = int(context_size / n_dims)
+        self.target1 = nn.Linear(self.dim_size + 2, 64)
+        self.target2 = nn.Linear(64, 32)
+        self.target = nn.Linear(32, target_size)
 
     def forward(self, contexts, msgs):
-        x = F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1)))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        target = self.target(x)
-        dim = F.relu(self.dim(torch.cat(msgs, dim=1)))
-        dim = self.dim2(dim)
-        return (F.softmax(target / 0.5, dim=1),
-                F.softmax(dim / 0.5, dim=1))
+        x1 = F.relu(self.dim1(torch.cat([contexts, msgs[0]], dim=1)))
+        dim_probs = F.softmax(
+            self.dim_choice(x1) / 1, dim=1)
+        dim_dist = torch.distributions.Categorical(dim_probs)
+        dim = dim_dist.sample()
+
+        dim_col = dim.reshape((-1, 1)).to(torch.int64)
+        dim_indices = torch.stack([torch.arange(0, self.dim_size)
+                                   for _ in range(contexts.shape[0])])
+        the_dim = torch.gather(contexts, 1,
+                               dim_indices + dim_col*self.dim_size)
+
+        x2 = F.relu(self.target1(torch.cat([the_dim, msgs[1]], dim=1)))
+        x2 = F.relu(self.target2(x2))
+        target_probs = F.softmax(
+            self.target(x2) / 1, dim=1)
+        target_dist = torch.distributions.Categorical(target_probs)
+        target = target_dist.sample()
+        return [dim_dist, target_dist], [dim, target]
 
 
 class MSEReceiver(nn.Module):
@@ -180,4 +191,4 @@ class RNNReceiver(nn.Module):
             combined = torch.cat([contexts, msg, hidden], dim=1)
             hidden, output = self.lstm(combined)
         target = self.target(output)
-        return F.softmax(target / 0.25, dim=1)
+        return F.softmax(target / 1, dim=1)

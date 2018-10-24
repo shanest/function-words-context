@@ -21,6 +21,7 @@ class Context(object):
         # TODO: allow non-trivial dims_per_obj and n_objs
         self.dims_per_obj = dims_per_obj or n_dims
         self.n_objs = n_objs or 2*n_dims
+        self.n_dims = n_dims
         dims = []
         for idx in range(n_dims):
             dimension = np.random.choice(scale,
@@ -43,6 +44,9 @@ class Context(object):
     def view(self, dims=None, dim_first=False, at_dim_idx=False):
         if dims is None:
             dims = self.dims
+        if at_dim_idx:
+            dims = (np.repeat(dims, self.n_dims, axis=1) *
+                    np.tile(np.eye(self.n_dims), self.n_objs))
         if not dim_first:
             dims = np.transpose(dims)
         return dims.flatten()

@@ -33,11 +33,11 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
     if sender_fn is not None:
         sender = sender_fn(context_size, n_dims)
-        sender_opt = torch.optim.Adam(sender.parameters())
+        sender_opt = torch.optim.Adam(sender.parameters(), lr=5e-4)
 
     # TODO: generalize max_msg argument to receivers
     receiver = receiver_fn(context_size, n_dims, n_objs)
-    receiver_opt = torch.optim.Adam(receiver.parameters())
+    receiver_opt = torch.optim.Adam(receiver.parameters(), lr=5e-4)
 
     def one_batch(batch_size):
         # 1. get contexts and target object from Nature
@@ -65,29 +65,32 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             """
             msg_dists = None
         else:
-            sender_contexts = [con.view(dim_first=dim_first,
-                                        at_dim_idx=at_dim_idx)
-                               for con in contexts]
-            msg_dists, msgs = sender(torch.Tensor(sender_contexts))
+            sender_contexts = torch.Tensor([con.view(dim_first=dim_first,
+                                                     at_dim_idx=at_dim_idx)
+                                            for con in contexts])
+            msg_dists, msgs = sender(sender_contexts)
 
         # 3. get choice from receiver
         rec_contexts = [contexts[idx].view(dims=rec_dims[idx],
                                            dim_first=dim_first,
                                            at_dim_idx=at_dim_idx)
                         for idx in range(len(rec_dims))]
+        choice_dists, choices = receiver(torch.Tensor(rec_contexts), msgs)
+        """
         choice_probs = receiver(torch.Tensor(rec_contexts), msgs)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
+        """
         # true_dims, _ = get_dim_and_dir(contexts, n_dims, context_size)
 
         # 4. get reward
         reward = torch.eq(torch.from_numpy(rec_target.flatten()),
-                          choice).float().detach()
+                          choices[-1]).float().detach()
 
-        return contexts, msg_dists, msgs, choice_dist, choice, reward
+        return contexts, msg_dists, msgs, choice_dists, choices, reward
 
     for batch in range(num_batches):
-        contexts, msg_dists, msgs, choice_dist, choice, reward = \
+        contexts, msg_dists, msgs, choice_dists, choices, reward = \
                 one_batch(batch_size)
         advantages = reward
         # reward 1/0 goes to -1/1
@@ -108,9 +111,16 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
         # 5b. receiver
         receiver_opt.zero_grad()
+        """
         choice_log_prob = choice_dist.log_prob(choice)
         receiver_reinforce = -torch.sum(advantages * choice_log_prob)
-        receiver_loss = receiver_reinforce
+        """
+        choice_log_probs = [choice_dists[idx].log_prob(choices[idx])
+                            for idx in range(len(choices))]
+        receiver_loss = -torch.sum(
+            advantages *
+            torch.sum(torch.stack(choice_log_probs, dim=1), dim=1))
+        # receiver_loss = receiver_reinforce
         receiver_loss.backward()
         receiver_opt.step()
 
@@ -119,6 +129,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             print(np.array([con.view(at_dim_idx=at_dim_idx, dim_first=dim_first)
                    for con in contexts]))
             print(torch.cat(msgs, dim=1))
+            print(choices[0])
             print(reward)
             percent = torch.mean(reward).data.item()
             print('% correct: {}'.format(percent))
