@@ -15,162 +15,66 @@ import argparse
 import os
 import numpy as np
 import torch
-import torch.nn.functional as F
 import pandas as pd
 import models
-
-
-def get_context(n_dims, scale, with_dim_label=False):
-    """Gets one 'context'.  A context is a 1-D array representation of
-    2*`n_dims` objects.  Each object has `n_dims` properties, where the
-    value for each property comes from `scale`.  In a context, each object is
-    either the largest or the smallest scalar value along some dimension.
-
-    The context is represented as a shape (4*n_dims) array, where `n_dims`
-    elements in a row represent each object.  The order is random.
-    """
-    objs = []
-    for idx in range(n_dims):
-        dimension = np.random.choice(scale, size=2*n_dims, replace=False)
-        where_min = np.argmin(dimension)
-        min_idx = idx * 2
-        dimension[[where_min, min_idx]] = dimension[[min_idx, where_min]]
-        where_max = np.argmax(dimension)
-        max_idx = min_idx + 1
-        dimension[[where_max, max_idx]] = dimension[[max_idx, where_max]]
-        objs.append(dimension)
-    objs = np.array(objs)
-    objs = np.transpose(objs)
-
-    send_objs, rec_objs = objs.copy(), objs.copy()
-
-    if with_dim_label:
-        def add_dim_labels(objs):
-            dims = np.concatenate([np.eye(n_dims)]*2*n_dims)
-            objs = np.reshape(objs, (-1, 1))
-            # objs = np.concatenate([dims, objs], axis=1)
-            objs = dims * objs
-            # permute order of dimensions for each obj
-            dim_perms = np.concatenate(
-                [np.random.permutation(n_dims) for _ in range(2*n_dims)])
-            row_idx = np.repeat(np.arange(2*n_dims), n_dims, axis=0)
-            row_shuffle = dim_perms + n_dims*row_idx
-            objs = objs[row_shuffle]
-            objs = objs.reshape((2*n_dims, -1))
-            return objs
-        send_objs = add_dim_labels(send_objs)
-        rec_objs = add_dim_labels(rec_objs)
-
-    # np.random.shuffle(send_objs)
-    # np.random.shuffle(rec_objs)
-    return send_objs.flatten(), rec_objs.flatten()
-
-
-def get_permutations(batch_size, context_size):
-    return np.stack([np.random.permutation(context_size)
-                     for _ in range(batch_size)])
-
-
-def apply_perms(contexts, perms, n_dims, batch_size, with_dim_labels):
-    # TODO: DOCUMENT
-    obj_indices = np.tile(np.stack(
-        [np.arange(n_dims**(1+int(with_dim_labels)))
-         for _ in range(batch_size)]), 2*n_dims)
-    perm_idx = (np.repeat(perms, n_dims**(1+int(with_dim_labels)), axis=1)
-                * (n_dims**(1+int(with_dim_labels))) + obj_indices)
-    return contexts[np.arange(batch_size)[:, None], perm_idx]
-
-
-def get_dim_and_dir(contexts, n_dims, context_size,
-                    with_dim_label=False, one_hot=False):
-    """Gets the dimension and whether it's max/min on that dimension for the
-    first object in a batch of contexts. """
-    # TODO: get this to work with with_dim_label... need for eval!
-    batch_size = np.shape(contexts)[0]
-    dims, mins = np.zeros(batch_size), np.zeros(batch_size)
-    for dim in range(n_dims):
-        the_dim = contexts[np.arange(batch_size)[:, None],
-                           np.repeat(np.arange(dim, context_size*n_dims + dim,
-                                               n_dims),
-                                     batch_size, axis=0)]
-        min_dim = np.argmin(the_dim, axis=1)
-        min_dim = (min_dim == 0).astype(int)  # where non-zero
-        max_dim = np.argmax(the_dim, axis=1)
-        max_dim = (max_dim == 0).astype(int)
-        mins += max_dim
-        dims += dim*(min_dim + max_dim)
-
-    if one_hot:
-        dims = np.eye(n_dims)[dims.astype(int)]
-        mins = np.eye(2)[mins.astype(int)]
-
-    return dims.astype(int), mins.astype(int)
-
-
-def get_communicative_success(contexts, objs, n_dims):
-    """Checks whether a predicted object (as values in each dimension) is
-    closer to the first object in context or not. """
-    n_objs = int(np.shape(contexts)[1] / np.shape(objs)[1])
-    context_objs = np.reshape(contexts, (-1, n_dims))
-    repeat_objs = np.repeat(objs, n_objs, axis=0)
-    mse_per_obj = np.reshape(
-        np.mean((context_objs - repeat_objs)**2, axis=1),
-        (-1, n_objs))
-    # dot_per_obj = np.sum(context_objs * repeat_objs, axis=1)[:, None]
-    predicted_obj = np.argmin(mse_per_obj, axis=1)[:, None]
-    return (predicted_obj == 0).astype(int)
+import context
+import util
 
 
 def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
-              n_dims=2, objs=np.arange(-1, 1, 1/100), with_dim_labels=False,
+              n_dims=2, scale=np.arange(-1, 1, 1/10),
+              dim_first=False, at_dim_idx=False,
               batch_size=32, num_batches=15000, record_every=50,
               save_models=True, num_test=5000, **kwargs):
 
-    context_size = 2*n_dims  # TODO: modify get_context, allow to vary
+    n_objs = 2*n_dims  # TODO: modify get_context, allow to vary
+    context_size = util.get_context_size(n_dims, scale, n_objs, at_dim_idx)
     data = pd.DataFrame(columns=['batch_num', 'percent_correct'])
 
     if sender_fn is not None:
-        sender = sender_fn(context_size, n_dims, with_dim_labels)
+        sender = sender_fn(context_size, n_dims)
         sender_opt = torch.optim.Adam(sender.parameters())
 
     # TODO: generalize max_msg argument to receivers
-    receiver = receiver_fn(context_size, n_dims, n_dims, with_dim_labels)
+    receiver = receiver_fn(context_size, n_dims, n_objs)
     receiver_opt = torch.optim.Adam(receiver.parameters())
 
     def one_batch(batch_size):
         # 1. get contexts and target object from Nature
-        all_contexts =[get_context(n_dims, objs, with_dim_labels)
-                       for _ in range(batch_size)]
-        sender_contexts = np.stack([context[0] for context in all_contexts])
-        rec_contexts = np.stack([context[1] for context in all_contexts])
-        # shuffle objects, so that which min/max dim varies
-        sender_perms = get_permutations(batch_size, context_size)
-        sender_contexts = apply_perms(sender_contexts, sender_perms, n_dims,
-                                      batch_size, with_dim_labels)
-        rec_contexts = apply_perms(rec_contexts, sender_perms, n_dims,
-                                   batch_size, with_dim_labels)
+        contexts = [context.Context(n_dims, scale) for _ in range(batch_size)]
+        # contexts = contexts - 0.5
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
         # permuted context
-        rec_perms = get_permutations(batch_size, context_size)
-        rec_contexts = apply_perms(rec_contexts, rec_perms, n_dims, batch_size,
-                                   with_dim_labels)
+        rec_perms = [np.random.permutation(n_objs) for _ in range(batch_size)]
+        rec_dims = [contexts[idx].permuted_dims(rec_perms[idx])
+                    for idx in range(len(rec_perms))]
         # 1b. get correct target index based on perms
-        rec_target = np.where(rec_perms == 0)[1][:, None]
+        rec_target = np.where(np.array(rec_perms) == 0)[1][:, None]
 
         # 2. get signals form sender
         if sender_fn is None:
             # TODO: implement FixedSender as a nn.Module in models, so that the
             # code can be maximally modular?  Would require returning
             # ``probabilities'' and wasting compute time ``training'' it
+            # TODO: fix this with new dir_and_dim; get one hots
+            """
             msgs = [torch.Tensor(val) for val in
-                    get_dim_and_dir(sender_contexts, n_dims, context_size, one_hot=True)]
+                    get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)]
+            """
             msg_dists = None
         else:
+            sender_contexts = [con.view(dim_first=dim_first,
+                                        at_dim_idx=at_dim_idx)
+                               for con in contexts]
             msg_dists, msgs = sender(torch.Tensor(sender_contexts))
 
         # 3. get choice from receiver
+        rec_contexts = [contexts[idx].view(dims=rec_dims[idx],
+                                           dim_first=dim_first,
+                                           at_dim_idx=at_dim_idx)
+                        for idx in range(len(rec_dims))]
         choice_probs = receiver(torch.Tensor(rec_contexts), msgs)
         choice_dist = torch.distributions.Categorical(choice_probs)
         choice = choice_dist.sample()
@@ -180,7 +84,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         reward = torch.eq(torch.from_numpy(rec_target.flatten()),
                           choice).float().detach()
 
-        return sender_contexts, msg_dists, msgs, choice_dist, choice, reward
+        return contexts, msg_dists, msgs, choice_dist, choice, reward
 
     for batch in range(num_batches):
         contexts, msg_dists, msgs, choice_dist, choice, reward = \
@@ -212,7 +116,8 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
         if batch % record_every == 0:
             print('\nIteration: {}'.format(batch))
-            print(contexts)
+            print(np.array([con.view(at_dim_idx=at_dim_idx, dim_first=dim_first)
+                   for con in contexts]))
             print(torch.cat(msgs, dim=1))
             print(reward)
             percent = torch.mean(reward).data.item()
@@ -234,7 +139,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
     if num_test:
         contexts, _, msgs, _, choice, reward = one_batch(num_test)
-        true_dims, true_mins = get_dim_and_dir(contexts, n_dims, context_size)
+        true_mins, true_dims = util.dirs_and_dims(contexts)
         # TODO: record more? whole context, other features of it?
         test_data = pd.DataFrame({'true_dim': true_dims,
                                   'true_mins': true_mins,
@@ -267,7 +172,8 @@ if __name__ == '__main__':
     parser.add_argument('--n_dims', type=int, default=2)
     parser.add_argument('--sender_type', type=str, default=None)
     parser.add_argument('--receiver_type', type=str, default='base')
-    parser.add_argument('--with_dim_labels', action='store_true')
+    parser.add_argument('--at_dim_idx', action='store_true')
+    parser.add_argument('--dim_first', action='store_true')
     args = parser.parse_args()
 
     args.sender_fn = {
