@@ -33,11 +33,11 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
     if sender_fn is not None:
         sender = sender_fn(context_size, n_dims)
-        sender_opt = torch.optim.Adam(sender.parameters(), lr=5e-4)
+        sender_opt = torch.optim.Adam(sender.parameters(), lr=1e-3)
 
     # TODO: generalize max_msg argument to receivers
     receiver = receiver_fn(context_size, n_dims, n_objs)
-    receiver_opt = torch.optim.Adam(receiver.parameters(), lr=5e-4)
+    receiver_opt = torch.optim.Adam(receiver.parameters(), lr=1e-3)
 
     def one_batch(batch_size):
         # 1. get contexts and target object from Nature
@@ -122,6 +122,8 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             torch.sum(torch.stack(choice_log_probs, dim=1), dim=1))
         # receiver_loss = receiver_reinforce
         receiver_loss.backward()
+        # TODO: play with this; norm an arg...
+        # torch.nn.utils.clip_grad_norm(receiver.parameters(), 0.5)
         receiver_opt.step()
 
         if batch % record_every == 0:
@@ -130,6 +132,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
                    for con in contexts]))
             print(torch.cat(msgs, dim=1))
             print(choices[0])
+            print(choices[1])
             print(reward)
             percent = torch.mean(reward).data.item()
             print('% correct: {}'.format(percent))

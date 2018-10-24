@@ -22,19 +22,21 @@ import torch.nn.functional as F
 class Sender(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Sender, self).__init__()
-        self.fc1 = nn.Linear(context_size, 64)
-        self.fc2 = nn.Linear(64, 32)
+        self.fc1 = nn.Linear(context_size, 32)
+        self.fc2 = nn.Linear(32, 32)
         self.dim_msg = nn.Linear(32, n_dims)
+        self.dim_bn = nn.BatchNorm1d(n_dims)
         self.min_msg = nn.Linear(32, 2)
+        self.min_bn = nn.BatchNorm1d(2)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = F.elu(self.fc1(x))
+        x = F.elu(self.fc2(x))
         dim_logits = self.dim_msg(x)
         min_logits = self.min_msg(x)
         # TODO: refactor these 4 lines into a util method?
-        msg_probs = (F.softmax(dim_logits / 1, dim=1),
-                     F.softmax(min_logits / 1, dim=1))
+        msg_probs = (F.softmax(self.dim_bn(dim_logits), dim=1),
+                     F.softmax(self.min_bn(min_logits), dim=1))
         msg_dists = [torch.distributions.OneHotCategorical(probs)
                      for probs in msg_probs]
         msgs = [dist.sample() for dist in msg_dists]
@@ -54,11 +56,11 @@ class SplitSender(nn.Module):
         self.min_msg = nn.Linear(32, 2)
 
     def forward(self, x):
-        dimx = F.relu(self.dim1(x))
-        dimx = F.relu(self.dim2(dimx))
+        dimx = F.elu(self.dim1(x))
+        dimx = F.elu(self.dim2(dimx))
         dim_logits = self.dim_msg(dimx)
-        minx = F.relu(self.min1(x))
-        minx = F.relu(self.min2(minx))
+        minx = F.elu(self.min1(x))
+        minx = F.elu(self.min2(minx))
         min_logits = self.min_msg(minx)
         msg_probs = (F.softmax(dim_logits / 1, dim=1),
                      F.softmax(min_logits / 1, dim=1))
@@ -115,19 +117,22 @@ class DimReceiver(nn.Module):
     # TODO: unify interface with this agent and others
     def __init__(self, context_size, n_dims, target_size):
         super(DimReceiver, self).__init__()
-        self.dim1 = nn.Linear(context_size + n_dims, 64)
-        self.dim_choice = nn.Linear(64, n_dims)
+        self.dim1 = nn.Linear(context_size + n_dims, 4)
+        self.dim_choice = nn.Linear(4, n_dims)
+        self.dim_bn = nn.BatchNorm1d(n_dims)
         self.dim_size = int(context_size / n_dims)
         self.target1 = nn.Linear(self.dim_size + 2, 64)
         self.target2 = nn.Linear(64, 32)
         self.target = nn.Linear(32, target_size)
+        self.target_bn = nn.BatchNorm1d(target_size)
 
     def forward(self, contexts, msgs):
         x1 = F.relu(self.dim1(torch.cat([contexts, msgs[0]], dim=1)))
+        dim_logits = self.dim_choice(x1)
         dim_probs = F.softmax(
-            self.dim_choice(x1) / 1, dim=1)
+            self.dim_bn(dim_logits), dim=1)
         dim_dist = torch.distributions.Categorical(dim_probs)
-        dim = dim_dist.sample()
+        dim = dim_dist.sample().detach()
 
         dim_col = dim.reshape((-1, 1)).to(torch.int64)
         dim_indices = torch.stack([torch.arange(0, self.dim_size)
@@ -135,10 +140,11 @@ class DimReceiver(nn.Module):
         the_dim = torch.gather(contexts, 1,
                                dim_indices + dim_col*self.dim_size)
 
-        x2 = F.relu(self.target1(torch.cat([the_dim, msgs[1]], dim=1)))
-        x2 = F.relu(self.target2(x2))
+        x2 = F.elu(self.target1(torch.cat([the_dim, msgs[1]], dim=1)))
+        x2 = F.elu(self.target2(x2))
+        target_logits = self.target(x2)
         target_probs = F.softmax(
-            self.target(x2) / 1, dim=1)
+            self.target_bn(target_logits), dim=1)
         target_dist = torch.distributions.Categorical(target_probs)
         target = target_dist.sample()
         return [dim_dist, target_dist], [dim, target]
