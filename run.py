@@ -33,16 +33,15 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
     if sender_fn is not None:
         sender = sender_fn(context_size, n_dims)
-        sender_opt = torch.optim.Adam(sender.parameters(), lr=1e-3)
+        sender_opt = torch.optim.Adam(sender.parameters(), lr=kwargs['lr'])
 
     # TODO: generalize max_msg argument to receivers
     receiver = receiver_fn(context_size, n_dims, n_objs)
-    receiver_opt = torch.optim.Adam(receiver.parameters(), lr=1e-3)
+    receiver_opt = torch.optim.Adam(receiver.parameters(), lr=kwargs['lr'])
 
     def one_batch(batch_size):
-        # 1. get contexts and target object from Nature
+        # 1. get contexts from Nature
         contexts = [context.Context(n_dims, scale) for _ in range(batch_size)]
-        # contexts = contexts - 0.5
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
@@ -50,6 +49,10 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         rec_perms = [np.random.permutation(n_objs) for _ in range(batch_size)]
         rec_dims = [contexts[idx].permuted_dims(rec_perms[idx])
                     for idx in range(len(rec_perms))]
+        rec_contexts = [contexts[idx].view(dims=rec_dims[idx],
+                                           dim_first=dim_first,
+                                           at_dim_idx=at_dim_idx)
+                        for idx in range(len(rec_dims))]
         # 1b. get correct target index based on perms
         rec_target = np.where(np.array(rec_perms) == 0)[1][:, None]
 
@@ -70,18 +73,8 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
                                             for con in contexts])
             msg_dists, msgs = sender(sender_contexts)
 
-        # 3. get choice from receiver
-        rec_contexts = [contexts[idx].view(dims=rec_dims[idx],
-                                           dim_first=dim_first,
-                                           at_dim_idx=at_dim_idx)
-                        for idx in range(len(rec_dims))]
+        # 3. get choice(s) from receiver
         choice_dists, choices = receiver(torch.Tensor(rec_contexts), msgs)
-        """
-        choice_probs = receiver(torch.Tensor(rec_contexts), msgs)
-        choice_dist = torch.distributions.Categorical(choice_probs)
-        choice = choice_dist.sample()
-        """
-        # true_dims, _ = get_dim_and_dir(contexts, n_dims, context_size)
 
         # 4. get reward
         reward = torch.eq(torch.from_numpy(rec_target.flatten()),
@@ -94,7 +87,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
                 one_batch(batch_size)
         advantages = reward
         # reward 1/0 goes to -1/1
-        # advantages = 2*reward - 1
+        advantages = 2*reward - 1
         # advantages = reward - reward.mean() / (reward.std() + 1e-8)
 
         # 5. compute losses and reinforce
@@ -111,16 +104,11 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
         # 5b. receiver
         receiver_opt.zero_grad()
-        """
-        choice_log_prob = choice_dist.log_prob(choice)
-        receiver_reinforce = -torch.sum(advantages * choice_log_prob)
-        """
         choice_log_probs = [choice_dists[idx].log_prob(choices[idx])
                             for idx in range(len(choices))]
         receiver_loss = -torch.sum(
             advantages *
             torch.sum(torch.stack(choice_log_probs, dim=1), dim=1))
-        # receiver_loss = receiver_reinforce
         receiver_loss.backward()
         # TODO: play with this; norm an arg...
         # torch.nn.utils.clip_grad_norm(receiver.parameters(), 0.5)
@@ -131,6 +119,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             print(np.array([con.view(at_dim_idx=at_dim_idx, dim_first=dim_first)
                    for con in contexts]))
             print(torch.cat(msgs, dim=1))
+            print(choices)
             print(reward)
             percent = torch.mean(reward).data.item()
             print('% correct: {}'.format(percent))
@@ -150,6 +139,8 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             torch.save(sender.state_dict(), out_root + 'sender.pt')
 
     if num_test:
+        sender.eval()
+        receiver.eval()
         contexts, _, msgs, _, choice, reward = one_batch(num_test)
         true_mins, true_dims = util.dirs_and_dims(contexts)
         # TODO: record more? whole context, other features of it?
@@ -184,9 +175,15 @@ if __name__ == '__main__':
     parser.add_argument('--n_dims', type=int, default=2)
     parser.add_argument('--sender_type', type=str, default=None)
     parser.add_argument('--receiver_type', type=str, default='base')
+    parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--at_dim_idx', action='store_true')
     parser.add_argument('--dim_first', action='store_true')
     args = parser.parse_args()
+
+    # save args for future reference
+    if not os.path.exists(args.out_path):
+        os.makedirs(args.out_path)
+    pd.DataFrame(vars(args), index=[0]).to_csv(args.out_path + 'args.csv')
 
     args.sender_fn = {
         'base': models.Sender,
