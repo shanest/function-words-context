@@ -21,18 +21,20 @@ def visualize_trial(data):
     msg_vars = [col for col in data if col.startswith('msg')]
     long_data = pd.melt(
         data,
-        id_vars=['true_dim', 'true_mins', 'true_total', 'total_msg'],
+        id_vars=['true_dim', 'true_mins', 'true_total', 'total_msg', 'correct'],
         value_vars=msg_vars,
         var_name='msg',
         value_name='sent')
+    long_data = pd.melt(
+        long_data,
+        id_vars=['true_total', 'total_msg', 'correct', 'msg', 'sent'],
+        value_vars=['true_dim', 'true_mins'],
+        var_name='feature',
+        value_name='value')
 
     print(ggplot(data=long_data) +
-     geom_bar(aes('true_dim', fill='sent'), position='dodge') +
-     facet_wrap('msg'))
-
-    print(ggplot(data=long_data) +
-     geom_bar(aes('true_mins', fill='sent'), position='dodge') +
-     facet_wrap('msg'))
+          geom_bar(aes('value', fill='sent'), position='dodge') +
+          facet_wrap(['feature', 'msg']))
 
 
 def visualize_training(base_dir='../data/exp1/',
