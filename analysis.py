@@ -15,7 +15,14 @@ import pandas as pd
 from plotnine import *
 
 
-def visualize_trial(data):
+def save_or_show(plot, out_file):
+    if out_file:
+        plot.save(out_file)
+    else:
+        print(plot)
+
+
+def visualize_trial(data, title='Example Trial', out_file=None):
 
     data = data.astype('category')  # just in case
     msg_vars = [col for col in data if col.startswith('msg')]
@@ -32,13 +39,18 @@ def visualize_trial(data):
         var_name='feature',
         value_name='value')
 
-    print(ggplot(data=long_data) +
-          geom_bar(aes('value', fill='sent'), position='dodge') +
-          facet_wrap(['feature', 'msg']))
+    plot = (ggplot(data=long_data) +
+            geom_bar(aes('value', fill='sent'), position='dodge') +
+            facet_wrap(['feature', 'msg'], scales='free', nrow=2) +
+            ggtitle(title) +
+            theme(subplots_adjust={'wspace': 0.25, 'hspace': 0.4}))
+
+    save_or_show(plot, out_file)
 
 
 def visualize_training(base_dir='../data/exp1/',
-                       dims=range(1, 4), trials=range(10)):
+                       dims=range(1, 4), trials=range(10),
+                       out_file=None):
 
     tall_data = pd.DataFrame()
     for dim in dims:
@@ -52,7 +64,10 @@ def visualize_training(base_dir='../data/exp1/',
             tall_data = tall_data.append(cur)
     tall_data['trial'] = tall_data['trial'].astype('category')
     tall_data['dims'] = tall_data['dims'].astype('category')
-    print(ggplot(data=tall_data) +
-          geom_line(aes(x='batch_num', y='accuracy',
-                        group='trial',
-                        colour='dims')))
+
+    plot = (ggplot(data=tall_data) +
+            geom_line(aes(x='batch_num', y='accuracy',
+                          group='trial',
+                          colour='dims')))
+
+    save_or_show(plot, out_file)
