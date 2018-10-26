@@ -105,8 +105,8 @@ class BaseReceiver(nn.Module):
     def __init__(self, context_size, n_dims, target_size):
         super(BaseReceiver, self).__init__()
         self.fc1 = nn.Linear(context_size + n_dims + 2,  64)
-        self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 32)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 32)
         self.target = nn.Linear(32, target_size)
         self.target_bn = nn.BatchNorm1d(target_size)
 

@@ -33,3 +33,24 @@ def visualize_trial(data):
     print(ggplot(data=long_data) +
      geom_bar(aes('true_mins', fill='sent'), position='dodge') +
      facet_wrap('msg'))
+
+
+def visualize_training(base_dir='../data/exp1/',
+                       dims=range(1, 4), trials=range(10)):
+
+    tall_data = pd.DataFrame()
+    for dim in dims:
+        for trial in trials:
+            cur = pd.read_csv('{}/n{}/trial_{}/train.csv'.format(base_dir,
+                                                                 dim, trial))
+            cur['trial'] = (dim-1)*len(trials) + trial
+            cur['dims'] = dim
+            cur['accuracy'] = cur.rolling(
+                10, min_periods=1).mean()['percent_correct']
+            tall_data = tall_data.append(cur)
+    tall_data['trial'] = tall_data['trial'].astype('category')
+    tall_data['dims'] = tall_data['dims'].astype('category')
+    print(ggplot(data=tall_data) +
+          geom_line(aes(x='batch_num', y='accuracy',
+                        group='trial',
+                        colour='dims')))
