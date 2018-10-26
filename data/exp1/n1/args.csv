@@ -1,0 +1,2 @@
+,num_trials,out_path,batch_size,num_batches,record_every,num_test,n_dims,sender_type,receiver_type,lr,at_dim_idx,dim_first
+0,10,../data/exp1/n1/,64,5000,50,5000,1,base,dim,0.0005,False,True

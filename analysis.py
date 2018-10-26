@@ -15,9 +15,9 @@ import pandas as pd
 from plotnine import *
 
 
-def save_or_show(plot, out_file):
+def save_or_show(plot, out_file, width=8, height=6):
     if out_file:
-        plot.save(out_file)
+        (plot + theme(dpi=300)).save(out_file, width=width, height=height)
     else:
         print(plot)
 
@@ -48,9 +48,9 @@ def visualize_trial(data, title='Example Trial', out_file=None):
     save_or_show(plot, out_file)
 
 
-def visualize_training(base_dir='../data/exp1/',
+def visualize_training(base_dir='data/exp1/',
                        dims=range(1, 4), trials=range(10),
-                       out_file=None):
+                       title='Experiment Training', out_file=None):
 
     tall_data = pd.DataFrame()
     for dim in dims:
@@ -68,6 +68,7 @@ def visualize_training(base_dir='../data/exp1/',
     plot = (ggplot(data=tall_data) +
             geom_line(aes(x='batch_num', y='accuracy',
                           group='trial',
-                          colour='dims')))
+                          colour='dims'), alpha=0.75) +
+            ggtitle(title))
 
     save_or_show(plot, out_file)
