@@ -12,6 +12,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 """
 import pandas as pd
+import numpy as np
 from plotnine import *
 
 
@@ -72,3 +73,16 @@ def visualize_training(base_dir='data/exp1/',
             ggtitle(title))
 
     save_or_show(plot, out_file)
+
+
+def descriptives(base_dir='data/exp1', dims=range(1, 4), trials=range(10)):
+
+    for dim in dims:
+        print('Dimension {}'.format(dim))
+        accs = []
+        for trial in trials:
+            cur = pd.read_csv(
+                '{}/n{}/trial_{}/test.csv'.format(base_dir, dim, trial))
+            accs.append(cur['correct'].mean())
+        print(np.mean(accs))
+        print(np.std(accs))
