@@ -188,13 +188,13 @@ class MSEReceiver(nn.Module):
 
 class RNNReceiver(nn.Module):
 
-    def __init__(self, context_size, max_msg, hidden_size=64):
+    def __init__(self, context_size, n_dims, n_objs, max_msg=2, hidden_size=64):
         super(RNNReceiver, self).__init__()
         self.hidden_size = hidden_size
         self.max_msg = max_msg
         self.lstm = nn.LSTMCell(context_size + max_msg + hidden_size,
                                 hidden_size)
-        self.target = nn.Linear(hidden_size, context_size)
+        self.target = nn.Linear(hidden_size, n_objs)
 
     def forward(self, contexts, msgs):
         hidden = torch.zeros(contexts.shape[0], self.hidden_size)
@@ -207,4 +207,6 @@ class RNNReceiver(nn.Module):
             combined = torch.cat([contexts, msg, hidden], dim=1)
             hidden, output = self.lstm(combined)
         target = self.target(output)
-        return F.softmax(target / 1, dim=1)
+        target_dist = torch.distributions.Categorical(
+            F.softmax(target / 1, dim=1))
+        return [target_dist], [target_dist.sample()]
