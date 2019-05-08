@@ -15,6 +15,7 @@ import argparse
 import os
 import numpy as np
 import torch
+import torch.nn.functional as F
 import pandas as pd
 import models
 import context
@@ -61,11 +62,8 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             # TODO: implement FixedSender as a nn.Module in models, so that the
             # code can be maximally modular?  Would require returning
             # ``probabilities'' and wasting compute time ``training'' it
-            # TODO: fix this with new dir_and_dim; get one hots
-            """
-            msgs = [torch.Tensor(val) for val in
-                    get_dim_and_dir(contexts, n_dims, context_size, one_hot=True)]
-            """
+            msgs = [F.one_hot(torch.LongTensor(val)).float()
+                    for val in util.dirs_and_dims(contexts)]
             msg_dists = None
         else:
             sender_contexts = torch.Tensor([con.view(dim_first=dim_first,
