@@ -27,15 +27,17 @@ class Sender(nn.Module):
     def __init__(self, context_size, n_dims):
         super(Sender, self).__init__()
         self.fc1 = nn.Linear(context_size, 64)
+        self.bn1 = nn.BatchNorm1d(64)
         self.fc2 = nn.Linear(64, 64)
+        self.bn2 = nn.BatchNorm1d(64)
         self.dim_msg = nn.Linear(64, n_dims)
         self.dim_bn = nn.BatchNorm1d(n_dims)
         self.min_msg = nn.Linear(64, 2)
         self.min_bn = nn.BatchNorm1d(2)
 
     def forward(self, x):
-        x = F.elu(self.fc1(x))
-        x = F.elu(self.fc2(x))
+        x = self.bn1(F.elu(self.fc1(x)))
+        x = self.bn2(F.elu(self.fc2(x)))
         dim_logits = self.dim_msg(x)
         min_logits = self.min_msg(x)
         # TODO: refactor these 4 lines into a util method?
@@ -105,15 +107,18 @@ class BaseReceiver(nn.Module):
     def __init__(self, context_size, n_dims, target_size):
         super(BaseReceiver, self).__init__()
         self.fc1 = nn.Linear(context_size + n_dims + 2,  64)
+        self.bn1 = nn.BatchNorm1d(64)
         self.fc2 = nn.Linear(64, 64)
+        self.bn2 = nn.BatchNorm1d(64)
         self.fc3 = nn.Linear(64, 32)
+        self.bn3 = nn.BatchNorm1d(32)
         self.target = nn.Linear(32, target_size)
         self.target_bn = nn.BatchNorm1d(target_size)
 
     def forward(self, contexts, msgs):
-        x = F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1)))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = self.bn1(F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1))))
+        x = self.bn2(F.relu(self.fc2(x)))
+        x = self.bn3(F.relu(self.fc3(x)))
         target_logits = self.target(x)
         target_probs = F.softmax(
             self.target_bn(target_logits), dim=1)
@@ -168,7 +173,6 @@ class MSEReceiver(nn.Module):
         self.fc3 = nn.Linear(32, 32)
         self.obj_layer = nn.Linear(32, context_size)
         self.context_size = context_size
-        self.n_dims = n_dims
 
     def forward(self, contexts, msgs):
         x = F.relu(self.fc1(torch.cat([contexts] + msgs, dim=1)))
