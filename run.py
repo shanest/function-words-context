@@ -44,10 +44,12 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         # 1. get contexts from Nature
         contexts = [context.Context(n_dims, scale, n_objs, at_dim_idx)
                     for _ in range(batch_size)]
-
-        # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
         # permuted context
+        # NOTE: the above comment is false in this branch
+        target = np.array([context.get_target() for context in contexts])
+
+        # 1a. permute context for receiver
         rec_perms = [np.random.permutation(n_objs) for _ in range(batch_size)]
         rec_dims = [contexts[idx].permuted_dims(rec_perms[idx])
                     for idx in range(len(rec_perms))]
@@ -56,7 +58,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
                                            at_dim_idx=at_dim_idx)
                         for idx in range(len(rec_dims))]
         # 1b. get correct target index based on perms
-        rec_target = np.where(np.array(rec_perms) == 0)[1][:, None]
+        rec_target = np.where(np.array(rec_perms) == target[:, np.newaxis])[1][:, None]
 
         # 2. get signals form sender
         if sender_fn is None:
