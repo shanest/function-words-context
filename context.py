@@ -65,15 +65,17 @@ class Context(object):
         which_dim = np.random.randint(self.n_dims)
         return possible[get_max][which_dim]
 
-    def dir_and_dim(self):
+    def dir_and_dim(self, target):
         as_min_max = np.stack([
             np.argmin(self.dims, axis=1),
             np.argmax(self.dims, axis=1)
         ])
         # a pair: first elt == 0 if min, 1 if max
         # second elt == dim
-        direction, dim = np.where(as_min_max == 0)
-        return direction[0], dim[0]
+        direction, dim = np.where(as_min_max == target)
+        # NB: dir/dim can have length more than two, if target is min/max in
+        # more than one dimension
+        return direction, dim
 
     def permuted_dims(self, perm):
         """Permutes self.dims by perm, where perm is a permutation of n_objs.

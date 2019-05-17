@@ -83,10 +83,10 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         reward = torch.eq(torch.from_numpy(rec_target.flatten()),
                           choices[-1]).float().detach()
 
-        return contexts, msg_dists, msgs, choice_dists, choices, reward
+        return contexts, msg_dists, msgs, choice_dists, choices, reward, target
 
     for batch in range(num_batches):
-        contexts, msg_dists, msgs, choice_dists, choices, reward = \
+        contexts, msg_dists, msgs, choice_dists, choices, reward, _ = \
                 one_batch(batch_size)
         advantages = reward
         # reward 1/0 goes to -1/1
@@ -144,7 +144,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
     if num_test:
         sender.eval()
         receiver.eval()
-        contexts, _, msgs, _, choice, reward = one_batch(num_test)
+        contexts, _, msgs, _, choice, reward, target = one_batch(num_test)
         true_mins, true_dims = util.dirs_and_dims(contexts)
         # TODO: record more? whole context, other features of it?
         test_data = pd.DataFrame({'true_dim': true_dims,
