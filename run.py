@@ -23,12 +23,12 @@ import util
 
 
 def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
-              n_dims=2, scale=np.arange(-1, 1, 1/10),
+              n_dims=2, scale=np.arange(-1, 1, 1/10), n_objs=None,
               dim_first=False, at_dim_idx=False,
               batch_size=32, num_batches=15000, record_every=50,
               save_models=True, num_test=5000, **kwargs):
 
-    n_objs = 2*n_dims  # TODO: modify get_context, allow to vary
+    n_objs = n_objs or 2*n_dims  # TODO: modify get_context, allow to vary
     context_size = util.get_context_size(n_dims, scale, n_objs, at_dim_idx)
     data = pd.DataFrame(columns=['batch_num', 'percent_correct'])
 
@@ -42,7 +42,8 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
 
     def one_batch(batch_size):
         # 1. get contexts from Nature
-        contexts = [context.Context(n_dims, scale) for _ in range(batch_size)]
+        contexts = [context.Context(n_dims, scale, n_objs, at_dim_idx)
+                    for _ in range(batch_size)]
 
         # 1a. permute context for receiver
         # NOTE: sender always sends 'first' object in context; receiver sees
@@ -62,6 +63,8 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
             # TODO: implement FixedSender as a nn.Module in models, so that the
             # code can be maximally modular?  Would require returning
             # ``probabilities'' and wasting compute time ``training'' it
+            # TODO: this doesn't work at the moment, b/c dirs_and_dims is
+            # broken
             msgs = [F.one_hot(torch.LongTensor(val)).float()
                     for val in util.dirs_and_dims(contexts)]
             msg_dists = None
@@ -171,6 +174,7 @@ if __name__ == '__main__':
     parser.add_argument('--record_every', type=int, default=50)
     parser.add_argument('--num_test', type=int, default=5000)
     parser.add_argument('--n_dims', type=int, default=2)
+    parser.add_argument('--n_objs', type=int, default=None)
     parser.add_argument('--sender_type', type=str, default=None)
     parser.add_argument('--receiver_type', type=str, default='base')
     parser.add_argument('--lr', type=float, default=5e-4)

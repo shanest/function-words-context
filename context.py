@@ -17,21 +17,26 @@ import numpy as np
 class Context(object):
 
     def __init__(self, n_dims, scale, n_objs=None, dims_per_obj=None,
-                 shuffle=True):
+                 restricted=False, shuffle=True):
         # TODO: allow non-trivial dims_per_obj and n_objs
         self.dims_per_obj = dims_per_obj or n_dims
         self.n_objs = n_objs or 2*n_dims
         self.n_dims = n_dims
+
         dims = []
         for idx in range(n_dims):
             dimension = np.random.choice(scale,
                                          size=self.n_objs, replace=False)
-            where_min = np.argmin(dimension)
-            min_idx = idx * 2
-            dimension[[where_min, min_idx]] = dimension[[min_idx, where_min]]
-            where_max = np.argmax(dimension)
-            max_idx = min_idx + 1
-            dimension[[where_max, max_idx]] = dimension[[max_idx, where_max]]
+            if restricted:
+                # each obj = min/max on some dim
+                assert self.n_objs == 2*n_dims
+                where_min = np.argmin(dimension)
+                min_idx = idx * 2
+                dimension[[where_min, min_idx]] = dimension[[min_idx, where_min]]
+                where_max = np.argmax(dimension)
+                max_idx = min_idx + 1
+                dimension[[where_max, max_idx]] = dimension[[max_idx, where_max]]
+
             dims.append(dimension)
 
         self.dims = np.array(dims)
@@ -50,6 +55,15 @@ class Context(object):
         if not dim_first:
             dims = np.transpose(dims)
         return dims.flatten()
+
+    def get_target(self, extreme=True):
+        """ An extreme target is min or max on some dim. """
+        # NOTE: dimensions are sampled w/o replacement, so no duplicates
+        # posssible for max or min
+        possible = [np.argmin(self.dims, axis=1), np.argmax(self.dims, axis=1)]
+        get_max = np.random.randint(2)
+        which_dim = np.random.randint(self.n_dims)
+        return possible[get_max][which_dim]
 
     def dir_and_dim(self):
         as_min_max = np.stack([
