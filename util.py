@@ -19,8 +19,9 @@ def unzip(ls):
     return list(zip(*ls))
 
 
-def dirs_and_dims(contexts):
-    return unzip([context.dir_and_dim() for context in contexts])
+def dirs_and_dims(contexts, targets):
+    return unzip([contexts[idx].dir_and_dim(targets[idx])
+                  for idx in range(len(contexts))])
 
 
 def get_context_size(n_dims, scale, n_objs, at_dim_idx):

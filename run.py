@@ -145,7 +145,7 @@ def run_trial(num, out_dir, sender_fn=None, receiver_fn=None,
         sender.eval()
         receiver.eval()
         contexts, _, msgs, _, choice, reward, target = one_batch(num_test)
-        true_mins, true_dims = util.dirs_and_dims(contexts)
+        true_mins, true_dims = util.dirs_and_dims(contexts, target)
         # TODO: record more? whole context, other features of it?
         test_data = pd.DataFrame({'true_dim': true_dims,
                                   'true_mins': true_mins,

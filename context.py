@@ -73,9 +73,10 @@ class Context(object):
         # a pair: first elt == 0 if min, 1 if max
         # second elt == dim
         direction, dim = np.where(as_min_max == target)
-        # NB: dir/dim can have length more than two, if target is min/max in
+        # NOTE: dir/dim can have length more than two, if target is min/max in
         # more than one dimension
-        return direction, dim
+        # tuple so that can save in pandas
+        return tuple(direction), tuple(dim)
 
     def permuted_dims(self, perm):
         """Permutes self.dims by perm, where perm is a permutation of n_objs.
